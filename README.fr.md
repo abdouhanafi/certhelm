@@ -120,12 +120,6 @@ Parcours de validation recommandé avant production : un premier renouvellement 
 
 Voir le [README en anglais](README.md) (sections *Repository structure*, *Quality assurance*, *Building executables*).
 
-## Paternité
-
-CertHelm appartient à Abdelfattah ([@abdouhanafi](https://github.com/abdouhanafi)), qui le maintient. Il a été conçu et
-développé avec Claude, l'assistant d'IA d'Anthropic, qui a écrit le code, les tests et la documentation sous la direction
-d'Abdelfattah. C'est Abdelfattah qui décide de ce qui est publié.
-
 ## Gouvernance
 
 | Sujet | Référence |

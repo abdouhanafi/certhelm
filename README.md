@@ -175,12 +175,6 @@ Output: `dist/CertHelm/CertHelm.exe`, `dist/agent/CertHelmAgent.exe` and `dist/a
 `CertHelmAgent_Setup.exe` embeds the agent: it is the only file to give to a server's administrator. It requests administrator
 rights because it installs into `C:\Program Files\CertHelmAgent` and registers a SYSTEM scheduled task.
 
-## Authorship
-
-CertHelm is owned and maintained by Abdelfattah ([@abdouhanafi](https://github.com/abdouhanafi)). It was designed and built
-with Claude, Anthropic's AI assistant, which wrote the code, tests and documentation under Abdelfattah's direction.
-Abdelfattah decides what is published.
-
 ## Governance
 
 | Topic | Reference |
