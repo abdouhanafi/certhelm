@@ -1,0 +1,6 @@
+{
+  "controller_url": "http://CONTROLLER-HOST:8765",
+  "token": "PASTE_THE_TOKEN_SHOWN_IN_CERTHELM_SETTINGS",
+  "hostname": "optional-server-name",
+  "allow_cert_management": false
+}

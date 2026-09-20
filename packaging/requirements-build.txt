@@ -1,0 +1,4 @@
+-r ../requirements.txt
+-r ../agent/requirements-tray.txt
+pyinstaller>=6
+pywin32

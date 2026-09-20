@@ -1,0 +1,5 @@
+# CertHelm desktop application (Windows)
+pywebview>=5
+keyring>=24
+cryptography>=42
+plyer>=2.1

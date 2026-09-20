@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CertHelm</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splash-screen">
+        <div class="splash-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:52px;height:52px;color:#009FDF;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <div class="splash-title">CertHelm</div>
+            <div class="splash-sub">Connexion à DigiCert...</div>
+        </div>
+        <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+    </div>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="window-controls">
+                <button class="dot red" title="Fermer" onclick="pywebview.api.close_window()"></button>
+                <button class="dot yellow" title="Réduire" onclick="pywebview.api.minimize_window()"></button>
+                <button class="dot green" title="Agrandir / Restaurer" onclick="pywebview.api.toggle_maximize_window()"></button>
+                <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Réduire / Agrandir la barre latérale">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+            </div>
+
+            <div class="brand-logos">
+                <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#009FDF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="8.5 12 11 14.5 15.5 9.5"></polyline></svg>
+                <span class="brand-name">CertHelm</span>
+            </div>
+
+            <nav class="menu">
+                <a href="#" class="menu-item active" id="nav-dashboard" data-view="dashboard" title="SSL Dashboard">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    <span class="menu-label">SSL Dashboard</span>
+                    <span class="badge-active">Active</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-pipeline" data-view="pipeline" title="Pipeline de Renouvellement">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1.5"></rect><rect x="14" y="3" width="7" height="10" rx="1.5"></rect><rect x="14" y="17" width="7" height="4" rx="1.5"></rect></svg>
+                    <span class="menu-label">Pipeline de Renouvellement</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-compliance" data-view="compliance" title="Conformité & Tendances">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.1-4-4L3 15.5"></path></svg>
+                    <span class="menu-label">Conformité & Tendances</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-agents" data-view="agents" title="Agents & Découverte">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect><line x1="10" y1="7" x2="14" y2="7"></line><line x1="7" y1="10" x2="7" y2="14"></line></svg>
+                    <span class="menu-label">Agents & Découverte</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-assignments" data-view="assignments" title="Manage Team">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span class="menu-label">Manage Team</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-inventory" data-view="inventory" title="Inventaire par Org.">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <span class="menu-label">Inventaire par Org.</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-users" data-view="users" title="Équipe DigiCert">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span class="menu-label">Équipe DigiCert</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-audit" data-view="audit" title="Audit & Sécurité">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    <span class="menu-label">Audit & Sécurité</span>
+                </a>
+                <a href="#" class="menu-item" id="nav-settings" data-view="settings" title="Paramètres">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span class="menu-label">Paramètres</span>
+                </a>
+            </nav>
+
+            <div class="quick-actions">
+                <div class="qa-title">Quick Actions</div>
+                <a href="#" class="qa-item" title="New SSL Request">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                    <span class="menu-label">New SSL Request</span>
+                </a>
+                <a href="#" class="qa-item" title="Renew Selected">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    <span class="menu-label">Renew Selected</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="info-strip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    <span>Certificate Lifecycle Management - connected to DigiCert</span>
+                    <span id="api-status-badge" class="badge" style="margin-left: 10px; font-size: 11px; padding: 3px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); color: #fff;">Vérification API...</span>
+                    <span id="balance-badge" class="badge" style="margin-left: 10px; font-size: 11px; padding: 3px 8px; border-radius: 4px; background: rgba(16, 185, 129, 0.15); color: #10b981; display: none;">Solde: ...</span>
+                </div>
+                <div class="user-profile">
+                    <button id="refresh-btn" class="btn-primary-action" style="display:flex; align-items:center; gap:5px; margin-right:15px;" onclick="refreshData()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        Rafraîchir
+                    </button>
+                    <div class="search-box" id="search-box-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="search-input" placeholder="Rechercher...">
+                        <button id="search-clear-btn" type="button" title="Effacer" style="display:none;">&times;</button>
+                    </div>
+                    
+                    <!-- Theme Toggle -->
+                    <button id="theme-toggle" class="action-btn" style="margin: 0 10px;" onclick="toggleTheme()" title="Toggle Theme">
+                        <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                        <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                    </button>
+                    <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Crect width='28' height='28' rx='14' fill='%23374151'/%3E%3Ctext x='14' y='18' font-family='sans-serif' font-size='11' font-weight='600' text-anchor='middle' fill='%23ffffff'%3EAD%3C/text%3E%3C/svg%3E" alt="User" class="avatar">
+                    <span class="username">Admin</span>
+                    <div class="notification-wrapper" id="notification-wrapper" onclick="document.getElementById('notification-dropdown').classList.toggle('active')">
+                        <svg class="bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="bell-icon" style="cursor:pointer; pointer-events: none;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                        <span id="notification-count" class="notification-count" style="display:none; pointer-events: none;">0</span>
+                        <div id="notification-dropdown" class="notification-dropdown">
+                            <div class="dropdown-header">Alertes (<span id="dropdown-count">0</span>)</div>
+                            <div class="dropdown-list" id="notification-list">
+                                <!-- Notifications injected here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard View -->
+            <div id="view-dashboard" class="view active">
+                <div class="main-tabs" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">
+                    <button class="main-tab active" data-target="certs-view">Certificats SSL</button>
+                    <button class="main-tab" data-target="domains-view">Domaines (DCV)</button>
+                    <button class="main-tab" data-target="orgs-view">Organisations (EV/OV)</button>
+                </div>
+                
+                <div class="dashboard-header">
+                    <h1>Certificate Dashboard</h1>
+                    <div class="filters">
+                        <button class="btn-export" onclick="exportCSV()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Export CSV
+                        </button>
+                        <span class="filter-label">Filtres:</span>
+                        <div class="custom-select" id="filter-status" data-value="all">
+                            <button type="button" class="custom-select-trigger">
+                                <span class="custom-select-label">Tous (Statut)</span>
+                                <svg class="custom-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option active" data-value="all">Tous (Statut)</div>
+                                <div class="custom-select-option" data-value="critical"><span class="custom-select-dot" style="background:#ef4444;"></span>Critique (≤ 7j)</div>
+                                <div class="custom-select-option" data-value="warning"><span class="custom-select-dot" style="background:#f59e0b;"></span>Proche (≤ 30j)</div>
+                            </div>
+                        </div>
+                        <div class="custom-select" id="filter-team" data-value="all">
+                            <button type="button" class="custom-select-trigger">
+                                <span class="custom-select-label">Toutes (Équipes)</span>
+                                <svg class="custom-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option active" data-value="all">Toutes (Équipes)</div>
+                                <div class="custom-select-option" data-value="assigned">Assignés</div>
+                                <div class="custom-select-option" data-value="unassigned">Non assignés</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-dashboard">
+                    <div class="stat-card" id="stat-card-total">
+                        <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
+                        <div class="stat-info"><span class="stat-value" id="stat-total">0</span><span class="stat-label">Total Certificats</span></div>
+                    </div>
+                    <div class="stat-card warning" id="stat-card-expiring">
+                        <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+                        <div class="stat-info"><span class="stat-value" id="stat-expiring">0</span><span class="stat-label">Expirent bientôt</span></div>
+                    </div>
+                    <div class="stat-card critical" id="stat-card-critical">
+                        <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></div>
+                        <div class="stat-info"><span class="stat-value" id="stat-critical">0</span><span class="stat-label">Critiques</span></div>
+                    </div>
+                    <div class="stat-card pending" id="stat-card-pending">
+                        <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></div>
+                        <div class="stat-info"><span class="stat-value" id="stat-pending">0</span><span class="stat-label">Pending</span></div>
+                    </div>
+                    <div class="stat-chart">
+                        <canvas id="donut-chart" width="120" height="120"></canvas>
+                        <div class="chart-legend" id="chart-legend"></div>
+                    </div>
+                </div>
+
+                <div class="timeline-section">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        Timeline des Expirations (90 jours)
+                    </div>
+                    <div class="timeline-track" id="timeline-track"></div>
+                    <div class="timeline-labels">
+                        <span>Aujourd'hui</span>
+                        <span>30 jours</span>
+                        <span>60 jours</span>
+                        <span>90 jours</span>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <div id="certs-view" class="view-section active">
+                        <div class="table-header">
+                            <div class="col-domain" data-sort="domain" style="cursor:pointer;" title="Sort by Domain">DOMAIN NAME</div>
+                            <div class="col-issuer" data-sort="product" style="cursor:pointer;" title="Sort by Issuer">ISSUER</div>
+                            <div class="col-expiry" data-sort="days_left" style="cursor:pointer;" title="Sort by Expiration">EXPIRATION DATE</div>
+                            <div class="col-team" data-sort="team" style="cursor:pointer;">ASSIGNED TEAM</div>
+                            <div class="col-status" data-sort="days_left" style="cursor:pointer;">STATUS</div>
+                            <div class="col-actions">ACTIONS</div>
+                        </div>
+                        <div class="cert-list" id="certs-container">
+                            <!-- Cards injected by JS -->
+                        </div>
+                        <div id="cert-list-pagination"></div>
+                    </div>
+                    
+                    <div id="domains-view" class="view-section" style="display:none;">
+                        <div class="table-header">
+                            <div class="col-domain-rich" style="flex: 2; cursor:pointer;" data-sort="name">DOMAIN</div>
+                            <div class="col-org" style="flex: 2; cursor:pointer;" data-sort="org_name">ORGANIZATION</div>
+                            <div class="col-date" style="flex: 1; cursor:pointer;" data-sort="date_added">DATE ADDED</div>
+                            <div class="col-dcv" style="flex: 1.5; cursor:pointer;" data-sort="method">DCV METHOD</div>
+                            <div class="col-status" style="flex: 1; cursor:pointer;" data-sort="status">VALIDATION STATUS</div>
+                            <div class="col-expiry" style="flex: 1; cursor:pointer;" data-sort="days_left">VALIDATION EXPIRES</div>
+                        </div>
+                        <div class="cert-list" id="domain-list">
+                            <!-- Cards injected by JS -->
+                        </div>
+                    </div>
+                    
+                    <div id="orgs-view" class="view-section" style="display:none;">
+                        <div class="table-header">
+                            <div class="col-org-name" style="flex: 2.2; cursor:pointer;" data-sort="name">ORGANISATION</div>
+                            <div class="col-org-status" style="flex: 0.9; cursor:pointer;" data-sort="status">STATUT</div>
+                            <div class="col-org-val" style="flex: 2.4">VALIDÉ POUR</div>
+                            <div class="col-org-pend" style="flex: 2">EN ATTENTE DE VALIDATION</div>
+                        </div>
+                        <div class="cert-list" id="org-list">
+                            <!-- Cards injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pipeline View (CLM workflow) -->
+            <div id="view-pipeline" class="view" style="display: none;">
+                <div class="dashboard-header">
+                    <h1>Pipeline de Renouvellement</h1>
+                    <div class="filters">
+                        <span class="filter-label" id="pipeline-count-label">0 certificat(s) à traiter (≤ 90j)</span>
+                    </div>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted); margin: -12px 0 20px;">
+                    Suivez chaque certificat à renouveler étape par étape, comme un vrai CLM. Faites glisser une carte — ou utilisez les flèches — pour avancer l'étape. Le suivi et les relances sont automatisés ici ; le renouvellement lui-même peut rester manuel ou être automatisé (Paramètres → Renouvellement automatique).
+                </div>
+                <div class="pipeline-board" id="pipeline-board">
+                    <!-- Columns injected by JS -->
+                </div>
+            </div>
+
+            <!-- Compliance & Trends View -->
+            <div id="view-compliance" class="view" style="display: none;">
+                <div class="dashboard-header">
+                    <h1>Conformité & Tendances</h1>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted); margin: -12px 0 20px;">
+                    DigiCert (comme le reste de l'industrie) réduit régulièrement la durée de validité maximale des certificats. Cette vue montre la durée de vie réelle de vos certificats par produit et l'historique des renouvellements détectés automatiquement.
+                </div>
+
+                <div class="stats-dashboard" id="compliance-stats-row" style="margin-bottom: 25px;">
+                    <!-- Summary cards injected by JS -->
+                </div>
+
+                <div class="timeline-section" style="margin-bottom: 20px;">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.1-4-4L3 15.5"></path></svg>
+                        Durée de validité par produit
+                    </div>
+                    <div id="compliance-product-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+
+                <div class="timeline-section">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        Historique des renouvellements détectés (<span id="renewal-history-count">0</span>)
+                    </div>
+                    <div id="renewal-history-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agents & Discovery View -->
+            <div id="view-agents" class="view" style="display: none;">
+                <div class="dashboard-header">
+                    <h1>Agents & Découverte</h1>
+                    <button class="btn-export" onclick="renderAgents()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        Rafraîchir
+                    </button>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted); margin: -12px 0 20px;">
+                    Les agents installés sur vos serveurs (Windows, Linux, RedHat) scannent en lecture seule les certificats réellement installés et remontent l'information ici — pour savoir ce qui est <em>vraiment</em> en production, pas seulement ce que DigiCert dit avoir émis. Voir <code>docs/agents.md</code> pour l'installation.
+                </div>
+
+                <div class="stats-dashboard" id="agents-stats-row" style="margin-bottom: 25px;">
+                    <!-- Summary cards injected by JS -->
+                </div>
+
+                <div class="timeline-section" style="margin-bottom: 20px;">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg>
+                        Agents connectés
+                    </div>
+                    <div id="agents-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+
+                <div class="timeline-section" style="margin-bottom: 20px;">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><polyline points="21 3 21 8 16 8"></polyline></svg>
+                        Certificats installés sur les serveurs — renouvellement
+                        <span id="renewal-mode-badge" style="margin-left:10px; font-size:11px; font-weight:500; padding:2px 8px; border-radius:10px;"></span>
+                    </div>
+                    <div id="renewal-certs-list" style="margin-top:10px; max-height:420px; overflow-y:auto;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+
+                <div class="timeline-section" style="margin-bottom: 20px;">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        Suivi des renouvellements (<span id="renewal-jobs-count">0</span>)
+                    </div>
+                    <div id="renewal-jobs-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+
+                <div class="timeline-section" style="margin-bottom: 20px;">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        Connu de DigiCert mais jamais détecté installé
+                    </div>
+                    <div id="agents-not-installed-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+
+                <div class="timeline-section">
+                    <div class="timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        Détecté sur un serveur mais inconnu de DigiCert
+                    </div>
+                    <div id="agents-unknown-list" style="margin-top:10px;">
+                        <!-- Rows injected by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Assignments View -->
+            <div id="view-assignments" class="view" style="display: none;">
+                <div class="dashboard-header">
+                    <h1>Manage Team Assignments</h1>
+                </div>
+                
+                <div class="assignment-panel">
+                    <form id="assignment-form" class="modern-form">
+                        <div class="form-row">
+                            <input type="text" id="assign-domain" placeholder="Domain (e.g. example.com)" required>
+                        </div>
+                        <div class="form-row">
+                            <input type="email" id="assign-approver" placeholder="Approver Email" required>
+                            <input type="email" id="assign-dns" placeholder="DNS Verifier Email">
+                            <input type="email" id="assign-installer" placeholder="Installer Email">
+                        </div>
+                        <button type="submit" class="btn-primary">Save Assignment</button>
+                    </form>
+                </div>
+
+                <div class="table-container mt-4">
+                    <div class="table-header">
+                        <div style="flex:1">DOMAIN</div>
+                        <div style="flex:1">APPROVER</div>
+                        <div style="flex:1">DNS VERIFIER</div>
+                        <div style="flex:1">INSTALLER</div>
+                    </div>
+                    <div class="cert-list" id="assign-container">
+                        <!-- Rows -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory View -->
+            <div id="view-inventory" class="view" style="display: none;">
+                <div class="dashboard-header" style="margin-bottom: 20px;">
+                    <h1>Inventaire Classifié par Organisation</h1>
+                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Tous vos certificats groupés par entité juridique</div>
+                </div>
+                
+                <div id="inventory-container" style="display: flex; flex-direction: column; gap: 20px;">
+                    <!-- Org blocks injected by JS -->
+                </div>
+            </div>
+
+            <!-- Users View -->
+            <div id="view-users" class="view" style="display: none;">
+                <div class="dashboard-header" style="margin-bottom: 20px;">
+                    <h1>Gestion de l'Équipe DigiCert</h1>
+                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Liste des employés ayant accès à votre portail DigiCert CertCentral</div>
+                </div>
+                
+                <div class="stats-dashboard" id="users-stats-row" style="margin-bottom: 20px;">
+                    <!-- Summary cards injected by JS -->
+                </div>
+
+                <div class="table-container">
+                    <div class="table-header">
+                        <div style="flex:2">UTILISATEUR</div>
+                        <div style="flex:2">EMAIL</div>
+                        <div style="flex:1">RÔLE / PERMISSIONS</div>
+                        <div style="flex:1">STATUT</div>
+                        <div style="flex:1">DERNIÈRE CONNEXION</div>
+                    </div>
+                    <div class="cert-list" id="users-container">
+                        <!-- User rows injected by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit View -->
+            <div id="view-audit" class="view" style="display: none;">
+                <div class="dashboard-header" style="margin-bottom: 10px;">
+                    <h1>Journal d'Audit & Sécurité</h1>
+                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Historique complet de toutes les actions effectuées sur le compte DigiCert</div>
+                </div>
+                <!-- Audit Filters -->
+                <div class="audit-filters" id="audit-filters" style="display:flex; gap:10px; align-items:center; margin-bottom:20px; padding:15px; background:var(--card-bg); border:1px solid var(--border-light); border-radius:12px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:var(--text-muted-dark);"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                    <span style="font-size:12px;color:var(--text-muted-dark);font-weight:600;">FILTRER :</span>
+                    <div class="custom-select" id="audit-filter-type" data-value="all">
+                        <button type="button" class="custom-select-trigger">
+                            <span class="custom-select-label">Tous les types</span>
+                            <svg class="custom-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                        <div class="custom-select-menu">
+                            <div class="custom-select-option active" data-value="all">Tous les types</div>
+                            <div class="custom-select-option" data-value="login">Connexions</div>
+                            <div class="custom-select-option" data-value="order">Commandes</div>
+                            <div class="custom-select-option" data-value="approve">Approbations</div>
+                            <div class="custom-select-option" data-value="revoke">Révocations</div>
+                        </div>
+                    </div>
+                    <input type="text" id="audit-filter-user" oninput="applyAuditFilters()" placeholder="Rechercher un utilisateur..." style="background:var(--input-bg);border:1px solid var(--border-medium);color:var(--text-bright);padding:6px 12px;border-radius:6px;font-size:12px;outline:none;min-width:200px;">
+                    <input type="date" id="audit-filter-date" onchange="applyAuditFilters()" style="background:var(--input-bg);border:1px solid var(--border-medium);color:var(--text-bright);padding:6px 12px;border-radius:6px;font-size:12px;outline:none;">
+                    <button onclick="clearAuditFilters()" style="background:transparent;border:1px solid var(--border-medium);color:var(--text-muted);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;transition:0.2s;" onmouseover="this.style.color='var(--text-bright)'" onmouseout="this.style.color='var(--text-muted)'">Réinitialiser</button>
+                </div>
+                <div id="audit-container" style="padding: 10px 0;">
+                    <!-- Audit timeline injected by JS -->
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div id="view-settings" class="view" style="display: none;">
+                <div class="dashboard-header">
+                    <h1>Paramètres du Système</h1>
+                </div>
+                
+                <div class="settings-grid">
+                    <div class="assignment-panel">
+                        <form id="settings-form" class="modern-form">
+                            <div class="settings-section-title">Connexion DigiCert</div>
+                            <div style="margin-bottom: 20px;">
+                                <label style="display:block; margin-bottom: 8px; color: var(--text-muted); font-size: 13px;">DigiCert API Key</label>
+                                <input type="password" id="setting-api-key" placeholder="Enter API Key" required style="width: 100%;">
+                            </div>
+
+                            <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                                <label for="setting-notifications" style="color: var(--text-main); font-size: 13px;">Notifications natives (Windows)</label>
+                                <input type="checkbox" id="setting-notifications" checked>
+                            </div>
+                            <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                                <label for="setting-alert-threshold" style="color: var(--text-muted); font-size: 12px; flex: 1;">Alerter quand un certificat expire dans</label>
+                                <input type="number" id="setting-alert-threshold" min="1" max="90" value="10" style="width: 70px; text-align:center;">
+                                <span style="color: var(--text-muted); font-size: 12px;">jour(s)</span>
+                            </div>
+
+                            <div class="settings-section-title">Alerting par e-mail (SMTP)</div>
+                            <div class="settings-smtp-note">
+                                ⚠️ Ces réglages sont enregistrés, mais l'envoi automatique d'e-mails via ce serveur SMTP nécessite une prise en charge côté backend (module Python de dispatch). Sans cette brique côté serveur, ils restent stockés mais inactifs — à faire suivre à qui maintient le backend.
+                            </div>
+                            <div class="settings-row-2col">
+                                <div>
+                                    <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Serveur SMTP</label>
+                                    <input type="text" id="setting-smtp-host" placeholder="smtp.office365.com">
+                                </div>
+                                <div>
+                                    <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Port</label>
+                                    <input type="number" id="setting-smtp-port" placeholder="587">
+                                </div>
+                            </div>
+                            <div class="settings-row-2col">
+                                <div>
+                                    <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Utilisateur SMTP</label>
+                                    <input type="text" id="setting-smtp-user" placeholder="alerting@example.com">
+                                </div>
+                                <div>
+                                    <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Mot de passe SMTP</label>
+                                    <input type="password" id="setting-smtp-password" placeholder="••••••••">
+                                </div>
+                            </div>
+                            <div class="settings-row-2col">
+                                <div>
+                                    <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Adresse d'expédition</label>
+                                    <input type="email" id="setting-smtp-from" placeholder="clm-alerts@example.com">
+                                </div>
+                                <div style="display:flex; align-items:center; gap: 10px; padding-top: 22px;">
+                                    <input type="checkbox" id="setting-smtp-tls" checked>
+                                    <label for="setting-smtp-tls" style="color: var(--text-main); font-size: 13px;">Connexion TLS</label>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 20px;">
+                                <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Destinataires des alertes (séparés par des virgules)</label>
+                                <input type="text" id="setting-smtp-recipients" placeholder="ssl-team@example.com, security@example.com" style="width: 100%;">
+                            </div>
+                            <div id="smtp-test-result" style="font-size: 12px; margin-bottom: 12px; display: none;"></div>
+
+                            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                <button type="submit" class="btn-primary">Enregistrer les Paramètres</button>
+                                <button type="button" id="smtp-test-btn" class="btn-primary-action">Tester la configuration SMTP</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="assignment-panel">
+                        <div class="settings-section-title" style="margin-top:0;">Agents & Découverte</div>
+                        <div class="settings-smtp-note" style="color: var(--accent-btn); background: rgba(0,159,223,0.08); border-color: rgba(0,159,223,0.25);">
+                            ℹ️ C'est l'adresse et le jeton à renseigner dans <code>agent_config.json</code> sur chaque serveur (voir <code>docs/agents.md</code>). Le PC qui héberge CertHelm doit être joignable depuis vos serveurs sur ce port.
+                        </div>
+                        <div class="settings-row-2col">
+                            <div>
+                                <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">controller_url (à coller tel quel dans agent_config.json)</label>
+                                <input type="text" id="agent-listener-url" readonly>
+                            </div>
+                            <div>
+                                <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Statut de l'écouteur</label>
+                                <input type="text" id="agent-listener-status" readonly>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Jeton d'authentification des agents</label>
+                            <input type="text" id="agent-token-display" readonly style="width:100%; font-family: monospace;">
+                        </div>
+                        <div id="agent-token-reveal" style="font-size: 12px; color: #f59e0b; margin-bottom: 12px; display:none;"></div>
+                        <button type="button" id="agent-regenerate-token-btn" class="btn-primary-action">Régénérer le token</button>
+                    </div>
+
+                    <div class="assignment-panel">
+                        <div class="settings-section-title" style="margin-top:0;">Renouvellement automatique</div>
+                        <div class="settings-smtp-note" style="color: #f59e0b; background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3);">
+                            ⚠️ En mode <strong>Réel</strong>, cliquer sur « Renouveler » passe une <strong>vraie commande chez DigiCert (potentiellement facturée)</strong>, fait générer une nouvelle clé sur le serveur puis y remplace automatiquement le certificat. Commencez par <strong>Simulation</strong> : elle montre exactement ce qui serait commandé, sans rien envoyer.
+                        </div>
+                        <div class="settings-row-2col">
+                            <div>
+                                <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">Mode</label>
+                                <select id="renewal-mode-select" class="form-input" style="margin-top:0;">
+                                    <option value="off">Désactivé — aucun renouvellement possible</option>
+                                    <option value="dry_run">Simulation — n'envoie rien (par défaut)</option>
+                                    <option value="live">Réel — commande chez DigiCert et installe</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px;">URL de l'API DigiCert (https, digicert.com)</label>
+                                <input type="text" id="renewal-base-url" class="form-input" style="margin-top:0; font-family: monospace;">
+                            </div>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted-dark); margin-bottom: 12px;">
+                            Pour un premier essai réel sans risque de facturation, utilisez l'environnement de démonstration DigiCert : <code>https://demo.digicert.com/services/v2</code> (avec une clé API de cet environnement). Le renouvellement n'avance que si CertHelm reste ouvert. Chaque serveur doit aussi l'autoriser dans son <code>agent_config.json</code> (<code>"allow_cert_management": true</code>).
+                        </div>
+                        <button type="button" id="renewal-settings-save-btn" class="btn-primary-action">Enregistrer</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <!-- Draft Modal -->
+        <div id="draft-modal" class="modal-overlay" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">Générer Email</h2>
+                    <button id="close-modal" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="template-selector">
+                        <button class="tab-btn active" id="tab-approver" onclick="showTemplate('approver')">Approbation (J-7)</button>
+                        <button class="tab-btn" id="tab-dns" onclick="showTemplate('dns')">Vérification DNS</button>
+                        <button class="tab-btn" id="tab-installer" onclick="showTemplate('installer')">Installation</button>
+                    </div>
+                    <div class="email-details mt-4">
+                        <label style="font-size: 12px; color: #9ca3af;">À :</label>
+                        <input type="text" id="draft-to" readonly class="form-input">
+                    </div>
+                    <div class="email-details mt-4">
+                        <label style="font-size: 12px; color: #9ca3af;">Contenu du mail :</label>
+                        <textarea id="draft-body" readonly class="form-input" style="height: 250px; resize: none;"></textarea>
+                    </div>
+                    <div class="modal-actions mt-4" style="display: flex; gap: 10px;">
+                        <button id="copy-draft-btn" class="btn-primary" style="flex: 1;" onclick="copyDraft()">Copier le message</button>
+                        <button id="mailto-btn" class="btn-primary-action" style="flex: 1;" onclick="sendViaOutlook()">Générer via Outlook</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Side Panel Overlay -->
+        <div id="sp-overlay" class="sp-overlay" onclick="closeDetails()"></div>
+        <!-- Side Panel Details -->
+        <div id="side-panel" class="side-panel">
+            <div class="side-panel-header">
+                <h2>Certificate Details</h2>
+                <button class="close-btn" onclick="closeDetails()">&times;</button>
+            </div>
+            <div class="side-panel-content" id="side-panel-content">
+                <!-- Content injected here -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="toast-container" class="toast-container"></div>
+    <script src="app.js"></script>
+</body>
+</html>

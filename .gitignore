@@ -1,0 +1,33 @@
+# Build output
+build/
+dist/
+*.spec.bak
+
+# Runtime state - created next to the running app, never source
+config.json
+workflow.db
+*.db
+agent_config.json
+agent.log
+agent.log.1
+pending/
+pending_renewals.json
+
+# Secrets - never commit
+*.pem
+*.key
+*.pfx
+*.p12
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

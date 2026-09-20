@@ -1,0 +1,4 @@
+# Only needed for --tray (system tray icon). The default and --daemon modes
+# use the Python standard library only.
+pystray
+Pillow
