@@ -135,13 +135,13 @@ class InstallerApp:
         try:
             with urllib.request.urlopen(url + "/agent/ping", timeout=5) as resp:
                 if resp.status == 200:
-                    self.status_label.config(text="✓ Connexion au contrôleur réussie.", fg="#10b981")
+                    self.status_label.config(text="Connexion au contrôleur réussie.", fg="#10b981")
                 else:
                     self.status_label.config(text=f"Réponse inattendue du serveur: {resp.status}", fg="#ef4444")
         except urllib.error.URLError as e:
-            self.status_label.config(text=f"✗ Impossible de joindre le contrôleur: {e.reason}", fg="#ef4444")
+            self.status_label.config(text=f"Impossible de joindre le contrôleur: {e.reason}", fg="#ef4444")
         except Exception as e:
-            self.status_label.config(text=f"✗ Erreur: {e}", fg="#ef4444")
+            self.status_label.config(text=f"Erreur: {e}", fg="#ef4444")
 
     def install(self):
         url = self.url_entry.get().strip()

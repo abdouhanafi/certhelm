@@ -248,14 +248,14 @@ function runDesktopAlertCheck(certs) {
     try {
         if (toNotify.length === 1) {
             const c = toNotify[0];
-            new Notification('⚠️ Certificat SSL à renouveler', {
+            new Notification('Certificat SSL à renouveler', {
                 body: `${c.domain} expire dans ${c.days_left} jour${c.days_left > 1 ? 's' : ''}.`,
                 tag: 'digicert-' + c.domain
             });
         } else {
             const preview = toNotify.slice(0, 5).map(c => `${c.domain} (${c.days_left}j)`).join('\n');
             const extra = toNotify.length > 5 ? `\n+ ${toNotify.length - 5} autre(s)` : '';
-            new Notification(`⚠️ ${toNotify.length} certificats SSL à renouveler (≤ ${DESKTOP_ALERT_THRESHOLD_DAYS}j)`, {
+            new Notification(`${toNotify.length} certificats SSL à renouveler (≤ ${DESKTOP_ALERT_THRESHOLD_DAYS}j)`, {
                 body: preview + extra,
                 tag: 'digicert-batch'
             });
@@ -638,11 +638,11 @@ function renderCertsHTML(certs, container) {
             let pText = escapeHtml(cert.prerequisites.join(' & '));
             let tooltip = escapeHtml(`Attention : Une validation ${cert.prerequisites.join(' & ')} est expirée ou expirera bientôt. Elle est requise pour le renouvellement.`);
             prereqHtml = `<div title="${tooltip}" style="display:inline-flex; align-items:center; gap:4px; font-size:10px; color:var(--text-warning); background:var(--bg-warning); padding:2px 6px; border-radius:4px; border:1px solid var(--border-warning); margin-top:6px; cursor:help;">
-                ⚠️ ${pText} Requis
+                ${pText} Requis
             </div>`;
         } else {
             prereqHtml = `<div title="Aucun blocage (DCV et Org valides)" style="display:inline-flex; align-items:center; gap:4px; font-size:10px; color:var(--text-success); background:var(--bg-success); padding:2px 6px; border-radius:4px; border:1px solid var(--border-success); margin-top:6px; cursor:help;">
-                ✅ Prêt pour renouvellement
+                Prêt pour renouvellement
             </div>`;
         }
 
@@ -1125,10 +1125,10 @@ function showDetails(domain) {
     let prereqHtml = '';
     if (cert.prerequisites && cert.prerequisites.length > 0) {
         prereqHtml = cert.prerequisites.map(p => 
-            `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#f59e0b;background:rgba(245,158,11,0.1);padding:3px 10px;border-radius:20px;border:1px solid rgba(245,158,11,0.2);">⚠️ ${escapeHtml(p)}</span>`
+            `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#f59e0b;background:rgba(245,158,11,0.1);padding:3px 10px;border-radius:20px;border:1px solid rgba(245,158,11,0.2);">${escapeHtml(p)}</span>`
         ).join(' ');
     } else {
-        prereqHtml = '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#10b981;background:rgba(16,185,129,0.1);padding:3px 10px;border-radius:20px;border:1px solid rgba(16,185,129,0.2);">✅ Prêt</span>';
+        prereqHtml = '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#10b981;background:rgba(16,185,129,0.1);padding:3px 10px;border-radius:20px;border:1px solid rgba(16,185,129,0.2);">Prêt</span>';
     }
 
     let formattedDate = 'N/A';
@@ -1321,7 +1321,7 @@ async function runLiveCheck(domain) {
             content.innerHTML = `
                 <div style="margin-bottom: 3px;"><b>Issuer:</b> ${escapeHtml(result.issuer)}</div>
                 <div><b>Expiration:</b> ${escapeHtml(result.expiry)}</div>
-                <div style="margin-top: 5px; color: #10b981; font-weight: bold; font-size: 12px;">✅ Connecté avec succès au port 443</div>
+                <div style="margin-top: 5px; color: #10b981; font-weight: bold; font-size: 12px;">Connecté avec succès au port 443</div>
             `;
         } else {
             content.innerHTML = `<span style="color: #ef4444;">Erreur: ${escapeHtml(result.message)}</span>`;
@@ -1802,7 +1802,7 @@ function clmRenderCard(cert, stageIdx) {
             </div>
             <div class="pipeline-card-product">${escapeHtml(cert.product || '')}</div>
             ${contactedLabel ? `<div class="pipeline-card-contacted">Dernière relance : ${contactedLabel}</div>` : ''}
-            ${cert.note ? `<div class="pipeline-card-note" title="${escapeHtml(cert.note)}">📝 ${escapeHtml(cert.note.length > 42 ? cert.note.slice(0, 42) + '…' : cert.note)}</div>` : ''}
+            ${cert.note ? `<div class="pipeline-card-note" title="${escapeHtml(cert.note)}">${escapeHtml(cert.note.length > 42 ? cert.note.slice(0, 42) + '…' : cert.note)}</div>` : ''}
             <div class="pipeline-checklist">
                 ${CHECKLIST_ITEMS.map(item => `
                     <span class="check-dot ${cert.checklist && cert.checklist[item.key] ? 'done' : ''}" title="${escapeHtml(item.label)}" onclick="toggleChecklistItem('${domainSafe}', '${item.key}', ${!(cert.checklist && cert.checklist[item.key])})">${item.label.charAt(0)}</span>
@@ -1925,7 +1925,7 @@ if (document.getElementById('agent-regenerate-token-btn')) {
             const res = await pywebview.api.regenerate_agent_token();
             const revealEl = document.getElementById('agent-token-reveal');
             revealEl.style.display = 'block';
-            revealEl.innerHTML = `⚠️ Nouveau token (copiez-le maintenant, il ne sera plus jamais affiché en clair) : <code style="user-select:all;">${escapeHtml(res.token)}</code>`;
+            revealEl.innerHTML = `Nouveau token (copiez-le maintenant, il ne sera plus jamais affiché en clair) : <code style="user-select:all;">${escapeHtml(res.token)}</code>`;
             showToast('Token régénéré avec succès', 'success');
             loadAgentSettingsInfo();
         } catch (e) {
@@ -2184,10 +2184,10 @@ const RENEWAL_STATUS = {
     ordering:     ['Envoi de la commande', '#009FDF'],
     ordered:      ["Commandé — en attente d'émission", '#f59e0b'],
     installing:   ['Installation en cours', '#009FDF'],
-    installed:    ['Installé ✓', '#10b981'],
+    installed:    ['Installé', '#10b981'],
     failed:       ['Échec', '#ef4444'],
     cancelled:    ['Annulé', '#6b7280'],
-    uncertain:    ['⚠ Statut incertain', '#ef4444'],
+    uncertain:    ['Statut incertain', '#ef4444'],
     simulated:    ['Simulation', '#8b5cf6']
 };
 

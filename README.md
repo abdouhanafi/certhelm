@@ -1,114 +1,166 @@
 # CertHelm
 
-**Certificate Lifecycle Management (CLM) for DigiCert CertCentral.**
-See every certificate you own, find out what is *really* deployed on your servers, and renew and install certificates safely — from one desktop app.
+**Certificate lifecycle management for organisations that operate TLS certificates through DigiCert CertCentral**
 
-> 🇫🇷 Version française : [README.fr.md](README.fr.md) · 📘 Guide pas à pas Windows (FR, prérequis, commandes, agents) : [docs/guide-windows.fr.md](docs/guide-windows.fr.md)
+[Version française](README.fr.md) | [Windows step-by-step guide (French)](docs/guide-windows.fr.md) | [Architecture](docs/architecture.md) | [Security model](docs/security.md)
 
 > **Independent project.** CertHelm is not affiliated with, endorsed by, or sponsored by DigiCert, Inc.
-> "DigiCert" is a trademark of its owner and is used here only to describe compatibility with the DigiCert CertCentral API.
-
-**Status: beta.** The discovery, monitoring and agent features are exercised by automated tests. The automatic-renewal
-pipeline has only been run against a fake DigiCert server — see [Project status](#project-status) before using it for real.
+> "DigiCert" is a trademark of its owner and is used solely to describe compatibility with the DigiCert CertCentral API.
 
 ---
 
-## Features
+## Executive summary
 
-| Area | What you get |
+Organisations that run TLS certificates at scale carry three recurring exposures: service outages caused by expired certificates,
+certificates that are issued but never deployed, and certificates in production that no central process knows about.
+The certificate authority's console shows what was *issued*; it does not show what is *installed*.
+
+CertHelm closes that gap. It consolidates the certificate inventory held in DigiCert CertCentral, verifies through lightweight
+agents what is actually deployed on each server, and, under explicit controls, automates the renewal and installation of
+certificates.
+
+| Outcome | How it is delivered |
 |---|---|
-| **Dashboard** | All DigiCert orders in one place: expiry countdown, status, product, organization, filters, CSV export. |
-| **Renewal pipeline** | A board that tracks each certificate through approval → DNS validation → order → install → verify, with reminders. |
-| **Compliance & trends** | Validity-period statistics and an automatically built renewal history. |
-| **Alerts** | Desktop notifications and optional SMTP e-mail alerts before expiry; ready-to-send e-mail drafts for approvers, DNS owners and installers. |
-| **Inventory & audit** | Domains and organizations with validation status, DigiCert users, audit log. |
-| **Agents & discovery** | Lightweight agents (Windows / Linux) report the certificates *actually installed* on each server. CertHelm flags certificates DigiCert issued but that were never deployed, and certificates found in production that DigiCert does not know about. |
-| **Remote control** | "Scan now", scan frequency and enable/disable per agent — over a pull-only channel (see [Security](docs/security.md)). |
-| **Automatic renewal** | One-click renewal: the agent creates the key and CSR **on the server**, CertHelm orders the renewal, checks the issued certificate, and the agent installs it (Windows store + IIS bindings, or PEM files + service reload on Linux) with rollback on failure. Off by default, with a no-side-effects **Simulation** mode. |
+| **Visibility** | A single dashboard of all orders, expiry horizons, validation status and renewal history. |
+| **Assurance** | Continuous reconciliation between certificates issued by the CA and certificates installed on servers. |
+| **Controlled automation** | Renewal and installation with a simulation mode, per-server consent, atomic ordering and automatic rollback. |
 
-| Agents & discovery | Renewal (Simulation mode) |
+**Status: beta.** Monitoring, discovery and remote operations are covered by automated tests. The automated-renewal chain has been
+verified against a simulated CA only; see [Project maturity](#project-maturity) before any production use.
+
+## Problem statement
+
+| Exposure | Typical root cause | CertHelm response |
+|---|---|---|
+| Outage caused by an expired certificate | Renewals tracked manually or by calendar reminders | Expiry monitoring, desktop and e-mail alerts, renewal pipeline |
+| Certificate renewed but never deployed | No feedback loop between the CA and the servers | Agents report installed certificates; issued-versus-installed reconciliation |
+| Unknown certificates in production | Certificates obtained outside the central process | Detection of certificates absent from the CA account |
+| Slow, error-prone renewal | Key generation, CSR, order and installation split across teams | Guided workflow and an optional automated chain |
+| Over-privileged automation | Scripts running with broad rights and no consent model | Command allow-list, per-server opt-in, simulation by default |
+
+## Capabilities
+
+| Domain | Scope |
+|---|---|
+| **Monitoring and alerting** | Order inventory with expiry countdown, filters and CSV export; desktop notifications; optional SMTP alerts; drafted communications for approvers, DNS owners and installers. |
+| **Renewal workflow** | Stage-based board (approval, DNS validation, order, installation, verification) with reminders and history. |
+| **Compliance and trends** | Validity-period statistics; renewal history built automatically from observed changes. |
+| **Discovery and reconciliation** | Windows and Linux agents report installed certificates; the platform flags certificates issued but not deployed, and certificates deployed but unknown to the CA. |
+| **Remote operations** | On-demand scan, scan frequency and enable or disable per agent, over a pull-only channel. |
+| **Automated renewal** | Key and CSR generated on the server, order placed with the CA, issued certificate verified, then installed by the agent (Windows certificate store and IIS bindings; PEM files and service reload on Linux). Disabled unless explicitly enabled. |
+| **Governance** | Team assignments per domain, audit log, per-domain notes and checklists. |
+
+## Product views
+
+| Agents and discovery | Renewal tracking (simulation mode) |
 |---|---|
 | ![Agents and discovery](docs/screenshots/agents.jpg) | ![Renewal tracking](docs/screenshots/renewal.jpg) |
 
 *Screenshots use sample data.*
 
-## How it works
+## Solution architecture
 
 ```mermaid
 flowchart LR
-    subgraph Desktop["CertHelm (Windows desktop app)"]
-        UI["Web UI"] --- API["Python API"]
+    subgraph Controller["CertHelm controller (Windows desktop application)"]
+        UI["Web interface"] --- API["Application API"]
         API --- DB[("SQLite")]
         API --- L["Agent listener :8765"]
         API --- W["Renewal worker"]
     end
     API -- HTTPS --> DC["DigiCert CertCentral API"]
     W -- HTTPS --> DC
-    A1["Agent (Windows server)"] -- "check-in / poll (HTTP)" --> L
-    A2["Agent (Linux server)"] -- "check-in / poll (HTTP)" --> L
+    A1["Agent (Windows server)"] -- "check-in and poll (HTTP)" --> L
+    A2["Agent (Linux server)"] -- "check-in and poll (HTTP)" --> L
 ```
 
-Agents **never accept incoming connections**: they call the controller (CertHelm) periodically. Commands reach an agent only
-as the answer to one of its own polls, and only from a short fixed allow-list. Details: [docs/architecture.md](docs/architecture.md).
+Agents never accept inbound connections. They call the controller periodically; commands reach an agent only as the reply to one of
+its own polls and only from a short, fixed allow-list. Details: [docs/architecture.md](docs/architecture.md).
 
-## Quick start
+## Risk and control framework
 
-> A detailed French walkthrough (prerequisites, every command, firewall, agents, troubleshooting) is in [docs/guide-windows.fr.md](docs/guide-windows.fr.md).
+| Control objective | Control implemented |
+|---|---|
+| **Confidentiality of private keys** | Keys are generated on the target server and are never transmitted; only the certificate signing request travels. |
+| **Integrity of deployed certificates** | The controller verifies the issued certificate against the request key, the domain and the validity period; the agent verifies again before replacing anything. |
+| **Protection against duplicate or unintended spend** | Simulation mode by default; explicit confirmation per renewal; atomic single-order claim; ambiguous outcomes are frozen for human review. |
+| **Least privilege and limited blast radius** | Per-server opt-in; command allow-list on both sides; the controller never supplies a file path or a command line. |
+| **Recoverability** | Linux: timestamped backups, configuration test, automatic restoration. Windows: bindings restored on failure, previous certificate retained. |
+| **Secret management** | API key, SMTP password and agent token held in the operating-system credential store; no secret in the repository. |
+| **Network exposure** | Agent-initiated connections only. Residual risk: the agent channel is plain HTTP with a shared token (see [docs/security.md](docs/security.md)). |
 
-Requirements: Windows 10/11 (the desktop app uses WebView2 and the Windows Credential Manager), Python 3.10+.
+## Adoption approach
+
+The platform is designed to be adopted in stages, each of which delivers value without requiring the next.
+
+| Phase | Objective | Activation |
+|---|---|---|
+| **1. Observe** | Consolidated view of CA inventory and expiry risk | Connect the CertCentral API key |
+| **2. Reconcile** | Compare issued and installed certificates | Deploy agents in read-only scan mode |
+| **3. Operate** | Manage agents centrally | Run agents continuously; use remote scan and settings |
+| **4. Automate** | Renew and install with controls | Simulation, then the DigiCert demonstration environment on a non-critical server, then production |
+
+## Getting started
+
+Prerequisites: Windows 10 or 11, Python 3.10 to 3.12, a CertCentral API key. The desktop application relies on WebView2 and the
+Windows Credential Manager.
 
 ```powershell
-git clone <your-repository-url> certhelm
+git clone https://github.com/abdouhanafi/certhelm.git
 cd certhelm
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 
-cd certhelm          # the app looks for ui/, config.json and workflow.db relative to the working directory
+cd certhelm          # the application resolves ui/, config.json and workflow.db from the working directory
 python main.py
 ```
 
-1. Open **Paramètres → Connexion DigiCert** and paste a CertCentral API key.
-   The key is stored in the Windows Credential Manager — never in a file.
-2. The dashboard fills with your orders.
-3. Optional: deploy agents — see [docs/agents.md](docs/agents.md).
+1. Open **Paramètres, Connexion DigiCert** and enter the CertCentral API key. It is stored in the Windows Credential Manager, never in a file.
+2. The dashboard populates from the CertCentral account.
+3. Optional: deploy agents (see [docs/agents.md](docs/agents.md)).
 
-Runtime files (`config.json`, `workflow.db`) are created in the working directory and are git-ignored.
+Runtime files (`config.json`, `workflow.db`) are created in the working directory and are excluded from version control.
+A detailed walkthrough in French, including firewall configuration and agent installation, is provided in
+[docs/guide-windows.fr.md](docs/guide-windows.fr.md). The interface text is currently mostly in French.
 
-> The interface text is currently mostly French. Translations and an i18n layer are welcome contributions.
+## Project maturity
 
-## Agents
+| Component | Status | Basis |
+|---|---|---|
+| Inventory, monitoring, alerts | Tested | Automated tests |
+| Discovery agents (Windows, Linux) | Tested | Automated tests; Linux logic exercised with real `openssl` in temporary directories |
+| Remote scan and agent settings | Tested | End-to-end tests including the compiled agent |
+| Renewal state machine and safeguards | Tested against a simulated CA | 60+ automated checks: concurrency, failure modes, rollback |
+| DigiCert order, status and download calls | **Not validated live** | Follows the public API documentation; exercised against a local fake only |
+| Windows `certreq` and IIS binding updates | **Not validated on real hosts** | Commands are simulated in tests |
+| Web-server reload on Linux | **Not validated on real hosts** | Fake service used in tests |
 
-The agent is a **single Python file** with no third-party dependency (`agent/certhelm_agent.py`), also built as a Windows
-executable with a graphical installer.
+Recommended validation path before production: simulation mode, then Live mode against the DigiCert demonstration environment
+(`https://demo.digicert.com/services/v2`) on a non-critical server, with the agent log monitored.
 
-* Windows: run `CertHelmAgent_Setup.exe`, paste the controller URL and token, pick a run mode.
-* Linux / RedHat: run the script under systemd (`--daemon`).
+Planned directions: per-agent credentials and TLS on the agent channel, a headless controller so that renewals progress without the
+desktop application open, an internationalisation layer, and additional installation targets.
 
-Full guide, configuration keys and troubleshooting: **[docs/agents.md](docs/agents.md)**.
+## Repository structure
 
-## Automatic renewal
+```
+certhelm/        Controller: main.py, database.py, renewal.py, digicert_api.py, ui/
+agent/           certhelm_agent.py (Windows and Linux), installer_windows.py, configuration example
+packaging/       PyInstaller specification and Windows build script
+docs/            Architecture, agents, renewal, security, Windows guide
+tests/           Automated tests (run_all.py)
+```
 
-Set in **Paramètres → Renouvellement automatique**:
+## Quality assurance
 
-| Mode | Effect |
-|---|---|
-| **Disabled** | No renewal possible. |
-| **Simulation** *(default)* | Builds and shows the order that *would* be placed. Sends nothing, contacts no agent. |
-| **Live** | Runs the full chain. **Places a real DigiCert order, which may be billed.** |
+```bash
+pip install cryptography
+python tests/run_all.py
+```
 
-Each server must additionally opt in with `"allow_cert_management": true` in its own `agent_config.json`.
-Design, state machine and safety guarantees: **[docs/renewal.md](docs/renewal.md)**.
-
-## Security in one minute
-
-* Private keys are generated on the server and **never leave it**; only the CSR travels.
-* The controller never sends a file path or a command line to an agent; the agent finds the target certificate itself.
-* An agent only installs a certificate that matches the key it generated for that exact job.
-* A renewal can never place two orders (atomic claim); ambiguous outcomes are frozen for a human to check.
-* The agent/controller channel is **plain HTTP with a shared token** — keep it on a trusted network or behind a TLS proxy.
-
-Read [docs/security.md](docs/security.md) before deploying beyond a test environment.
+The tests use a simulated DigiCert server, temporary directories and stubbed system commands. They never contact DigiCert, never
+touch a real certificate store, and replace the credential store with an in-memory fake. They run on every push through GitHub Actions.
 
 ## Building executables
 
@@ -117,42 +169,15 @@ pip install -r packaging/requirements-build.txt
 powershell -File packaging/build_windows.ps1
 ```
 
-Produces `dist/CertHelm/CertHelm.exe` (desktop app) and `dist/agent/CertHelmAgent.exe` + `CertHelmAgent_Setup.exe`.
-The installer requests administrator rights (it creates a SYSTEM scheduled task).
+Output: `dist/CertHelm/CertHelm.exe`, `dist/agent/CertHelmAgent.exe` and `dist/agent/CertHelmAgent_Setup.exe`.
+The installer requests administrator rights because it registers a SYSTEM scheduled task.
 
-## Tests
+## Governance
 
-```bash
-pip install cryptography
-python tests/run_all.py
-```
-
-The tests use a fake DigiCert server, temporary folders and stubbed system commands. They never contact DigiCert, never
-touch a real certificate store, and replace the credential store with an in-memory fake.
-
-## Project layout
-
-```
-certhelm/        desktop app: main.py (API + agent listener), database.py, renewal.py, digicert_api.py, ui/
-agent/           certhelm_agent.py (Windows + Linux), installer_windows.py, config example
-packaging/       PyInstaller spec and Windows build script
-docs/            architecture, agents, renewal, security
-tests/           automated tests (run_all.py)
-```
-
-## Project status
-
-* Discovery, remote scan/settings and the renewal state machine are covered by automated tests (150+ checks).
-* **Not validated against the live DigiCert service:** request/response formats of the order, status and download calls follow
-  the public API documentation but have only run against a local fake. Try Live mode first on DigiCert's demo environment
-  (`https://demo.digicert.com/services/v2`, configurable in Settings) with a non-critical server.
-* **Not exercised on real machines:** `certreq` and IIS binding updates, reloading a real nginx/httpd.
-* Windows-only desktop app; the agent runs on Windows and Linux.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
-
-## License
-
-[MIT](LICENSE)
+| Topic | Reference |
+|---|---|
+| Contribution rules | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Vulnerability disclosure | [SECURITY.md](SECURITY.md) |
+| Security model and hardening checklist | [docs/security.md](docs/security.md) |
+| Automated renewal design and safeguards | [docs/renewal.md](docs/renewal.md) |
+| License | [MIT](LICENSE) |

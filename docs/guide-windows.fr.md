@@ -1,10 +1,10 @@
 # Guide pas à pas — CertHelm sur un laptop Windows
 
-Ce guide vous emmène de « je n'ai rien d'installé » à « mon application tourne et un agent remonte les certificats d'un serveur ».
-Comptez 15 à 30 minutes. Toutes les commandes se tapent dans **PowerShell**.
+Ce guide décrit, étape par étape, l'installation de CertHelm sur un poste Windows vierge jusqu'à la remontée des certificats d'un premier serveur.
+Durée estimée : 15 à 30 minutes. Toutes les commandes s'exécutent dans **PowerShell**.
 
 > Ouvrir PowerShell : touche **Windows**, tapez `PowerShell`, Entrée.
-> Pour les étapes marquées 🛡️ (administrateur), faites un clic droit sur *Windows PowerShell* → **Exécuter en tant qu'administrateur**.
+> Les étapes indiquées **(administrateur)** requièrent PowerShell ouvert avec des droits élevés : clic droit sur *Windows PowerShell* → **Exécuter en tant qu'administrateur**.
 
 ## Sommaire
 
@@ -148,7 +148,7 @@ réellement installés et les envoie à CertHelm. Il n'ouvre aucun port : c'est 
 3. **Jeton** : il est affiché masqué. Cliquez **Régénérer le token** : le jeton complet s'affiche **une seule fois** — copiez-le tout de suite.
    (Régénérer invalide l'ancien jeton : les agents déjà installés devront être reconfigurés.)
 
-### 6.2 Autoriser le port sur le laptop (pare-feu) 🛡️
+### 6.2 Autoriser le port sur le poste (pare-feu) (administrateur)
 
 Si les agents sont sur d'**autres machines**, le pare-feu du laptop doit laisser entrer le port `8765`. PowerShell **administrateur** :
 
@@ -196,7 +196,7 @@ Retournez dans CertHelm → **Agents & Découverte** → **Rafraîchir** : votre
 Pour un agent qui reste en fonctionnement et que CertHelm peut piloter : `python agent\certhelm_agent.py --daemon` (Ctrl+C pour arrêter).
 En mode `--daemon` rien ne s'affiche dans la console : tout va dans `agent\agent.log`.
 
-> ⚠️ `agent_config.json` contient le jeton : ne le commitez jamais (déjà ignoré par Git).
+> Point de vigilance : `agent_config.json` contient le jeton : ne le commitez jamais (déjà ignoré par Git).
 
 ### 6.4 Installer l'agent sur un serveur Windows (recommandé)
 
@@ -218,7 +218,7 @@ Sur le **serveur** :
    * **URL du contrôleur** : `http://<IP-du-laptop>:8765`
    * **Token** : le jeton copié en 6.1
    * **Nom de ce serveur** : pré-rempli avec le nom de la machine
-4. Cliquez **Tester la connexion** → `✓ Connexion au contrôleur réussie`.
+4. Cliquez **Tester la connexion** → `Connexion au contrôleur réussie`.
 5. Choisissez le mode :
    * **Tâche en arrière-plan** *(serveurs — recommandé)* : tourne en continu, démarre avec Windows, pilotable depuis CertHelm.
    * **Icône barre des tâches** *(poste de travail)* : point de couleur près de l'horloge.
@@ -260,7 +260,7 @@ Les deux listes en bas de la page sont le vrai intérêt des agents :
 * **Connu de DigiCert mais jamais détecté installé** : certificat émis mais déployé nulle part (risque de panne).
 * **Détecté sur un serveur mais inconnu de DigiCert** : autre autorité, certificat auto-signé oublié…
 
-### 6.7 Arrêter ou désinstaller un agent Windows 🛡️
+### 6.7 Arrêter ou désinstaller un agent Windows (administrateur)
 
 ```powershell
 schtasks /end    /tn CertHelmAgent
