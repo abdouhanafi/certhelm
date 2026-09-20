@@ -29,6 +29,7 @@ All requests are `POST` JSON with `Authorization: Bearer <token>` (except `GET /
 | `GET /agent/ping` | Reachability test used by the installer. |
 | `POST /agent/checkin` | Full scan result: hostname, OS, agent version, list of certificates. Replies with the agent's settings. |
 | `POST /agent/poll` | Lightweight heartbeat every 30 s. Replies with settings and any queued commands. |
+| `POST /agent/verify` | Used by the installer: checks the token and says whether a hostname is already registered. Creates and changes nothing. |
 | `POST /agent/command_result` | Outcome of a command (`done` / `failed`, message, optional small `data` object such as a CSR). |
 
 ### Commands

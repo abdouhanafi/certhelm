@@ -6,7 +6,7 @@ Thanks for your interest in CertHelm.
 
 * **Never test against real infrastructure by default.** Tests must use the fake DigiCert server, temporary folders and stubbed
   system commands (see `tests/`). A change that can order a certificate or modify a certificate store needs a test that proves it
-  cannot do so in Simulation mode or without the server's opt-in.
+  cannot do so while renewal is switched off or without the server's opt-in.
 * **Never commit secrets or runtime data**: API keys, tokens, `agent_config.json`, `config.json`, `workflow.db`, keys,
   certificates. Use `example.com` names and placeholder addresses in tests, docs and screenshots.
 * Keep the agent a **single file with no third-party dependency**.

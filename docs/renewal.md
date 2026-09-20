@@ -1,18 +1,23 @@
 # Automatic renewal
 
-> **Read this first.** In **Live** mode CertHelm places a real DigiCert order (possibly billed) and an agent replaces a
-> certificate on a server. The DigiCert calls have not been validated against the live service — see
+> **Read this first.** "Renouveler" places a real DigiCert order (possibly billed) and an agent replaces a certificate on a
+> server. The DigiCert calls have not been validated against the live service — see
 > [Trying it safely](#trying-it-safely).
 
-## Modes
+## Switch and confirmation
 
 Set in **Paramètres → Renouvellement automatique** (stored in the database, so saving other settings never resets it).
 
-| Mode | What "Renouveler" does |
+| Setting | What "Renouveler" does |
 |---|---|
-| **Disabled** | Refuses. |
-| **Simulation** *(default)* | Builds the exact order that would be sent and stores it for inspection. **No network call, no agent command.** |
-| **Live** | Runs the whole chain below. A confirmation is asked when enabling Live, then again for every renewal. |
+| **Enabled** *(default)* | Runs the whole chain below. |
+| **Disabled** | Refuses. Nothing contacts DigiCert or an agent. |
+
+There is no dry-run mode. Instead, every renewal starts with a confirmation that lists **the exact order that will be placed**
+(DigiCert product, validity, names covered, original order number) and states that it may be billed. Nothing is sent until it is
+confirmed. A renewal is also refused up front, before any command is queued, when the server's administrator has not allowed it
+(see *Opt-in per server* below). A database that still holds the removed Simulation setting is treated as **Disabled**, never as enabled,
+and leftover simulation jobs are deleted on upgrade.
 
 A certificate can be renewed only if its domain has an **issued order in your DigiCert account** (the renewal is linked to it and
 reuses its product, organization and names) and the agent is v2.1+.
@@ -50,7 +55,6 @@ sequenceDiagram
 | `failed` | Ended with an error; the message says whether anything was ordered and what to do. |
 | `cancelled` | Cancelled by the operator. A DigiCert order already placed is **not** cancelled — do it on the DigiCert portal. |
 | `uncertain` | The order request had an ambiguous outcome (timeout, 5xx). It **blocks** any new renewal of that certificate until an operator checks the DigiCert portal and cancels the job. |
-| `simulated` | Result of a Simulation. |
 
 The worker that advances jobs runs inside the CertHelm app: **renewals only progress while CertHelm is open.**
 
@@ -66,7 +70,8 @@ The worker that advances jobs runs inside the CertHelm app: **renewals only prog
   the agent (Windows enforces it in `certreq -accept`) before anything is replaced.
 * **No paths or commands from the controller.** The agent finds the certificate to replace from its own scan (by thumbprint),
   re-validates every name it receives, and takes test/reload commands only from its own `agent_config.json`.
-* **Opt-in per server.** `"allow_cert_management": true` in the agent's own config. The controller cannot switch it on.
+* **Opt-in per server.** The installer's *Autoriser CertHelm à renouveler* box (which writes `"allow_cert_management": true` in the
+  agent's own config). The controller cannot switch it on; it only learns the setting from the agent and shows it in the console.
 * **API key destination.** The DigiCert base URL can only be an `https://` address on `digicert.com`.
 * **Rollback.** Linux: timestamped backups of the certificate and key, config test, reload; any failure restores the originals
   and deletes the backups. Windows: IIS bindings are switched back if a rebind fails; the old certificate is never deleted.
@@ -86,11 +91,11 @@ links (e.g. Let's Encrypt `live/`), password-protected keys, certificates served
 
 ## Trying it safely
 
-1. Keep **Simulation** and click *Renouveler*: inspect the order that would be sent (expandable in *Suivi des renouvellements*).
-2. Get an API key for DigiCert's **demo** environment, set the API URL to `https://demo.digicert.com/services/v2` in Settings
-   and switch to **Live** — orders there are not billed.
-3. Use a non-critical server with `allow_cert_management` enabled, and watch `agent.log`.
-4. Only then consider production.
+1. Get an API key for DigiCert's **demo** environment and set the API URL to `https://demo.digicert.com/services/v2` in Settings —
+   orders there are not billed.
+2. Install an agent on a non-critical server with renewal allowed, click *Renouveler*, read the confirmation carefully, and watch
+   `agent.log`. The request that was sent stays inspectable in *Suivi des renouvellements*.
+3. Only then point the API URL back at production.
 
 ## Troubleshooting
 

@@ -126,6 +126,19 @@ Facultatif, dans la même page : seuil d'alerte en jours, et **SMTP** pour recev
 
 ---
 
+### Le centre d'alertes (la cloche)
+
+La cloche en haut à droite regroupe tout ce qui demande votre attention, classé par gravité (critique, avertissement, info), avec des filtres.
+Elle se met à jour toute seule chaque minute :
+
+* échéances DigiCert (certificats, validation de domaine, validation d'organisation), **y compris les certificats expirés depuis moins de 30 jours** ;
+* certificats trouvés **sur les serveurs** par les agents qui expirent bientôt ou viennent d'expirer ;
+* **agents hors ligne** (10 minutes sans signe de vie ; critique après 24 h) ;
+* renouvellements en échec ou de statut incertain, et renouvellements réussis (information) ;
+* connexion DigiCert impossible (clé API absente ou refusée) et récepteur d'agents non démarré.
+
+Un clic sur une alerte ouvre l'élément concerné. Le nombre rouge indique ce qui demande une action ; « Tout est en ordre » ne s'affiche que si rien n'est à signaler.
+
 ## 6. Utiliser les agents
 
 Un **agent** est un petit programme installé sur un serveur (ou sur ce même laptop pour essayer). Il liste les certificats
@@ -139,7 +152,7 @@ réellement installés et les envoie à CertHelm. Il n'ouvre aucun port : c'est 
 
 1. CertHelm → **Paramètres** → section **Agents & Découverte**.
 2. **controller_url** : l'adresse à donner aux agents, de la forme `http://<IP-du-laptop>:8765`.
-   > Cette suggestion peut être fausse (adresse `169.254.x.x` d'une carte réseau inactive). Vérifiez votre vraie adresse :
+   > Sur un PC qui a plusieurs cartes réseau, cette suggestion peut ne pas être celle que vos serveurs peuvent joindre. Vérifiez votre vraie adresse :
    > ```powershell
    > ipconfig
    > ```
@@ -200,32 +213,43 @@ En mode `--daemon` rien ne s'affiche dans la console : tout va dans `agent\agent
 
 ### 6.4 Installer l'agent sur un serveur Windows (recommandé)
 
-Il faut deux fichiers : `CertHelmAgent.exe` et `CertHelmAgent_Setup.exe`. On les fabrique une fois sur le laptop :
+Il faut **un seul fichier** à remettre à l'administrateur du serveur : `CertHelmAgent_Setup.exe` (il embarque l'agent). On le fabrique une fois sur le laptop :
 
 ```powershell
 pip install -r packaging\requirements-build.txt
 powershell -File packaging\build_windows.ps1
 ```
 
-Ils se trouvent alors dans `dist\agent\`. (Windows SmartScreen peut avertir : les exécutables ne sont pas signés.)
+Il se trouve alors dans `dist\agent\`. (Windows SmartScreen peut avertir : les exécutables ne sont pas signés.)
 
 Sur le **serveur** :
 
-1. Créez un dossier réservé aux administrateurs, par ex. `C:\Program Files\CertHelmAgent`, et copiez-y les **deux** `.exe`.
-   > L'agent tourne sous le compte SYSTEM : ne l'installez pas sur un Bureau ou un dossier utilisateur.
+1. Copiez `CertHelmAgent_Setup.exe` où vous voulez sur le serveur (le Bureau convient : l'installeur copie lui-même l'agent dans
+   `C:\Program Files\CertHelmAgent` et en réserve l'accès aux administrateurs et à SYSTEM, car l'agent tourne sous SYSTEM).
 2. Double-cliquez `CertHelmAgent_Setup.exe` (acceptez la demande d'administrateur).
 3. Remplissez :
    * **URL du contrôleur** : `http://<IP-du-laptop>:8765`
    * **Token** : le jeton copié en 6.1
    * **Nom de ce serveur** : pré-rempli avec le nom de la machine
-4. Cliquez **Tester la connexion** → `Connexion au contrôleur réussie`.
+4. Cliquez **Tester la connexion et le jeton** → `Connexion et jeton valides`. Une adresse fausse, un pare-feu ou un jeton refusé donnent un message précis.
 5. Choisissez le mode :
    * **Tâche en arrière-plan** *(serveurs — recommandé)* : tourne en continu, démarre avec Windows, pilotable depuis CertHelm.
    * **Icône barre des tâches** *(poste de travail)* : point de couleur près de l'horloge.
    * **Rien** : écrit seulement la configuration.
 6. Laissez **décochée** la case *« Autoriser CertHelm à renouveler les certificats de ce serveur »* tant que vous n'avez pas lu
    [renewal.md](renewal.md) (elle sert au renouvellement automatique, voir §7).
-7. Cliquez **Installer**. Le premier scan part immédiatement.
+7. Cliquez **Installer**. L'installeur copie l'agent, l'enregistre, le démarre, puis **attend que le serveur apparaisse dans CertHelm** et affiche
+   `Terminé : « NOM » est enregistré dans CertHelm et actif.` Rien n'est installé si l'adresse ou le jeton est faux.
+
+Vous pouvez relancer l'installeur à tout moment : il affiche l'état actuel, permet de changer l'adresse, le jeton ou l'autorisation de renouvellement, et a un bouton **Désinstaller l'agent de ce serveur**.
+
+Déploiement sans interface (GPO, script) :
+
+```powershell
+CertHelmAgent_Setup.exe --silent --controller-url http://<IP-du-laptop>:8765 --token <jeton> --allow-renewal
+```
+
+Le résultat est écrit dans `install.log` (code de sortie `0` = enregistré, `1` = échec, `2` = arguments manquants, `3` = installé mais serveur absent de la console).
 
 Vérifier :
 
@@ -248,7 +272,7 @@ Dans **Agents & Découverte**, sur la ligne de chaque agent :
 | Bouton | Effet |
 |---|---|
 | **Scanner maintenant** | Demande un scan immédiat. L'agent répond sous ~30 secondes et une notification donne le résultat. |
-| **Réglages** | Fréquence de scan automatique (1 h à 7 jours) et interrupteur **Agent actif** (un agent désactivé ne scanne plus). Affiche aussi les dernières commandes. |
+| **Détails** | Nom, système, adresse IP, version, premier contact, dernier scan, dernier signe de vie, autorisation de renouvellement donnée par l'administrateur du serveur, **liste des certificats remontés** (jours restants) et dernières commandes. On y règle aussi la fréquence de scan (1 h à 7 jours) et l'interrupteur **Agent actif** (un agent désactivé ne scanne plus), et on peut **Retirer de la console** le serveur (refusé pendant un renouvellement ; un agent encore en marche se ré-enregistre : désinstallez-le d'abord). |
 
 Les boutons sont **grisés** pour un agent trop ancien (v1). Un agent récent lancé en « un seul scan » garde les boutons actifs mais
 **ne répondra pas** (il ne tourne pas en permanence) : la commande passera en échec « Pas de réponse de l'agent » après 10 minutes.
@@ -269,22 +293,22 @@ schtasks /delete /tn CertHelmAgent /f
 
 Puis supprimez le dossier de l'agent. En mode icône : supprimez aussi
 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\CertHelmAgentTray.bat` et quittez l'icône (clic droit → *Quitter*).
-Côté CertHelm, l'agent reste listé (hors ligne) : il n'existe pas encore de bouton de suppression.
+Ou relancez `CertHelmAgent_Setup.exe` et cliquez **Désinstaller l'agent de ce serveur** (ou `CertHelmAgent_Setup.exe --uninstall`).
+Côté CertHelm, retirez ensuite le serveur : **Agents & Découverte → Détails → Retirer de la console**.
 
 ---
 
-## 7. Tester le renouvellement (sans risque)
+## 7. Renouveler un certificat depuis CertHelm
 
-Par défaut, CertHelm est en mode **Simulation** : il n'envoie *rien* à DigiCert et ne contacte aucun agent.
+Le renouvellement passe une **vraie commande DigiCert (potentiellement facturée)**. Il n'y a pas de mode simulation : chaque renouvellement commence par une confirmation qui détaille la commande exacte, et rien n'est envoyé avant que vous ayez confirmé.
 
 1. **Agents & Découverte** → section **Certificats installés sur les serveurs — renouvellement** : les certificats qui existent aussi dans votre compte DigiCert ont un bouton **Renouveler**.
-2. Cliquez **Renouveler** → confirmez la *simulation*.
-3. Dans **Suivi des renouvellements**, ouvrez **« Voir la commande qui serait envoyée à DigiCert »** : c'est exactement ce qui serait commandé (produit, noms, durée).
+2. Cliquez **Renouveler** : la confirmation affiche le produit, la durée, les noms couverts et le numéro de la commande d'origine. Confirmez.
+3. Suivez l'avancement dans **Suivi des renouvellements** ; « Voir la requête envoyée à DigiCert » montre la requête (sans la clé privée).
 
-Le passage en mode **Réel** (vraie commande DigiCert, potentiellement **facturée**, et remplacement d'un certificat sur un serveur) demande
-d'avoir lu [renewal.md](renewal.md). Faites d'abord l'essai sur l'environnement de démonstration DigiCert
-(`https://demo.digicert.com/services/v2`, réglable dans **Paramètres → Renouvellement automatique**) avec un serveur non critique, et n'oubliez pas que
-chaque serveur doit autoriser l'opération (`"allow_cert_management": true` dans son `agent_config.json`). Le suivi ne progresse que tant que **CertHelm reste ouvert**.
+Avant la production, lisez [renewal.md](renewal.md) et faites un premier essai sur l'environnement de démonstration DigiCert
+(`https://demo.digicert.com/services/v2`, réglable dans **Paramètres → Renouvellement automatique**) avec un serveur non critique. Chaque serveur doit avoir autorisé
+l'opération : case **« Autoriser CertHelm à renouveler »** de l'installeur (sinon le bouton est remplacé par « Non autorisé sur ce serveur »). Le suivi ne progresse que tant que **CertHelm reste ouvert**.
 
 ---
 
@@ -314,7 +338,8 @@ chaque serveur doit autoriser l'opération (`"allow_cert_management": true` dans
 | `agent.log` : `HTTP 401` / `Unauthorized` | Jeton faux ou régénéré depuis. Réinstallez l'agent avec le nouveau jeton. |
 | Boutons **Scanner maintenant** grisés | Agent trop ancien (v1) : réinstallez avec la version actuelle. |
 | **Scanner maintenant** finit en « Pas de réponse de l'agent » | L'agent ne tourne pas en continu (mode « un seul scan », service arrêté) : passez en *Tâche en arrière-plan* / `--daemon`. |
-| L'installeur dit « Agent introuvable » | `CertHelmAgent.exe` n'est pas dans le même dossier : choisissez-le dans la fenêtre qui s'ouvre. |
+| L'installeur dit « refuse ce jeton » | Le jeton a été régénéré dans CertHelm depuis, ou mal copié : copiez le nouveau jeton (Paramètres → Agents & Découverte). |
+| L'installeur dit « Impossible de joindre CertHelm » | Mauvaise adresse ou port, CertHelm fermé, ou pare-feu du PC CertHelm (§6.2). |
 | SmartScreen bloque les `.exe` | Exécutables non signés : « Informations complémentaires » → « Exécuter quand même », ou signez-les avec votre certificat de code. |
 
 Pour aller plus loin : [architecture](architecture.md) · [agents](agents.md) · [renouvellement](renewal.md) · [sécurité](security.md).

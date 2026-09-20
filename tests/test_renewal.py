@@ -129,19 +129,30 @@ def job(job_id): return db.get_renewal_job(job_id)
 
 seed()
 
-# 1. default mode + dry run
-check("default mode is dry_run", renewal.get_mode() == "dry_run")
+# 1. default mode, legacy mode, preview (nothing is ever sent by a preview)
+check("default mode is live (per-server opt-in + confirmation protect it)", renewal.get_mode() == "live")
+db.set_setting(renewal.SETTING_MODE, "dry_run")
+check("legacy 'dry_run' database value is treated as OFF, never as live", renewal.get_mode() == "off")
+check("the Simulation mode no longer exists", renewal.MODES == ("off", "live"))
+check("setting the removed mode is refused", api.set_renewal_settings("dry_run", "")["status"] == "error")
+db.set_setting(renewal.SETTING_MODE, "live")
 db.set_setting(renewal.SETTING_BASE_URL, FAKE_URL)
-r = api.start_renewal("HOST1", "A" * 40)
-check("dry run: simulated job created", r["status"] == "success" and r["simulated"], r)
-j = job(r["job_id"])
-check("dry run: status simulated, nothing sent", j["status"] == "simulated" and FAKE["posts"] == [] and FAKE["gets"] == [])
-check("dry run: no agent command queued", db.get_recent_commands("HOST1") == [])
-check("dry run: preview names product + order + placeholder CSR",
-      j["payload"]["endpoint"] == "/order/certificate/ssl_plus" and j["payload"]["body"]["renewal_of_order_id"] == 4242
-      and j["payload"]["body"]["certificate"]["csr"] == dc.CSR_PLACEHOLDER)
-check("dry run: message says SIMULATION", "SIMULATION" in j["message"])
-check("dry run can be repeated", api.start_renewal("HOST1", "A" * 40)["status"] == "success")
+pv = api.preview_renewal("HOST1", "A" * 40)
+check("preview: describes the order that would be placed",
+      pv["status"] == "success" and pv["product"] == "ssl_plus" and pv["original_order_id"] == 4242
+      and "www.example.com" in pv["dns_names"] and pv["validity_years"] == 1, pv)
+check("preview: sent nothing and created nothing",
+      FAKE["posts"] == [] and FAKE["gets"] == [] and db.list_renewal_jobs() == [] and db.get_recent_commands("HOST1") == [])
+check("preview: unknown certificate refused", api.preview_renewal("HOST1", "F" * 40)["status"] == "error")
+seed("NOTALLOWED", thumb="9" * 39 + "8")
+controller.touch_agent("NOTALLOWED", "2.2", "10.0.0.9", False)
+refused = api.start_renewal("NOTALLOWED", "9" * 39 + "8")
+check("server whose admin did not allow renewal is refused before any command",
+      refused["status"] == "error" and "autorisé" in refused["message"] and db.get_recent_commands("NOTALLOWED") == [], refused)
+check("preview refuses it too", api.preview_renewal("NOTALLOWED", "9" * 39 + "8")["status"] == "error")
+controller.touch_agent("NOTALLOWED", "2.2", "10.0.0.9", True)
+check("once the admin allows it, the same renewal can be previewed",
+      api.preview_renewal("NOTALLOWED", "9" * 39 + "8")["status"] == "success")
 
 # 2. off
 api_mode = api.set_renewal_settings("off", "https://demo.digicert.com/services/v2")
@@ -173,7 +184,7 @@ check("nothing sent to DigiCert by refusals", FAKE["posts"] == [])
 # 5. live happy path
 seed()
 r = api.start_renewal("HOST1", "A" * 40)
-check("live: job awaiting_csr", r["status"] == "success" and not r["simulated"] and job(r["job_id"])["status"] == "awaiting_csr", r)
+check("live: job awaiting_csr", r["status"] == "success" and job(r["job_id"])["status"] == "awaiting_csr", r)
 jid = r["job_id"]
 dup = api.start_renewal("HOST1", "A" * 40)
 check("live: duplicate blocked while active", dup["status"] == "error" and "déjà en cours" in dup["message"])
@@ -333,9 +344,9 @@ jid12 = api.start_renewal("HOST1", "b" * 40)["job_id"]
 c12 = pick(poll("HOST1"), "generate_csr", jid12)
 report("HOST1", c12, "done", "ok", {"csr": make_csr(make_key(), "app.example.com")})
 posts_before = len(FAKE["posts"])
-renewal.set_mode("dry_run")
+renewal.set_mode("off")
 mgr.step()
-check("leaving live mode stops a queued order", job(jid12)["status"] == "failed" and len(FAKE["posts"]) == posts_before, job(jid12)["message"])
+check("switching renewal off stops a queued order", job(jid12)["status"] == "failed" and len(FAKE["posts"]) == posts_before, job(jid12)["message"])
 renewal.set_mode("live")
 
 # 15. overview

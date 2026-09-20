@@ -15,19 +15,33 @@ controller.
 
 ### With the installer (recommended)
 
-Run `CertHelmAgent_Setup.exe` (it must sit in the same folder as `CertHelmAgent.exe`; it asks for administrator rights):
+`CertHelmAgent_Setup.exe` is the **only file to give to the server's administrator**: it embeds the agent. Run it (it asks for
+administrator rights):
 
-1. Paste the controller URL and token, click **Tester la connexion**.
+1. Enter the CertHelm address and the token, then click **Tester la connexion et le jeton**: it says whether CertHelm answers, whether
+   the token is accepted, and whether this server is already registered.
 2. Choose how to run the agent:
    * **Background task** *(servers)* — runs continuously (`--daemon`), starts with Windows under the SYSTEM account and restarts
      itself if it crashes. Required for remote control and renewal. Log: `agent.log` next to the agent.
    * **Tray icon** *(workstations)* — runs in the user session with a status dot (green = last check-in OK, red = failed).
    * **Nothing** — only writes `agent_config.json`.
 3. Optionally tick **Allow CertHelm to renew this server's certificates** (off by default — see [renewal.md](renewal.md)).
+4. Click **Installer**. The installer copies the agent into `C:\Program Files\CertHelmAgent` and restricts that folder to
+   Administrators and SYSTEM (the agent runs as SYSTEM and its configuration holds the token), registers the task, starts it, then
+   **waits until the server appears in the CertHelm console** and says so. Nothing is installed if the address or token is wrong.
 
-> The agent runs as SYSTEM: install it in a folder only administrators can write to (for example
-> `C:\Program Files\CertHelmAgent`), never on a desktop or user folder, otherwise any user could replace the executable and
-> gain SYSTEM rights.
+Run the installer again at any time to change the address, the token or the renewal permission; it shows the current state
+and has a **Désinstaller** button (stops and removes the task; the folder with the configuration and log is kept).
+
+### Scripted deployment (GPO, remote shell)
+
+```powershell
+CertHelmAgent_Setup.exe --silent --controller-url http://10.0.0.5:8765 --token <token> [--hostname NAME] [--mode schedule|tray|manual] [--allow-renewal]
+CertHelmAgent_Setup.exe --uninstall
+```
+
+The outcome is written to `install.log` in the install folder (exit code `0` = registered, `1` = failed, `2` = missing arguments,
+`3` = installed but the server did not appear in the console).
 
 ### Manually
 
@@ -89,8 +103,14 @@ A plain cron job (`0 6 * * * python3 certhelm_agent.py`) also works for scanning
 In **Agents & Découverte**, each agent (v2.0+) has:
 
 * **Scanner maintenant** — queued; the agent picks it up within ~30 s and the result is shown as a notification.
-* **Réglages** — scan frequency (1 h – 7 days) and an *Agent actif* switch. A disabled agent stops scanning and reporting until
-  re-enabled. The panel also lists the last commands and their results.
+* **Détails** — name, system, address, agent version, first contact, last scan, last sign of life, whether the server's
+  administrator allowed automatic renewal, the **certificates the agent reported** (with days left), and the last commands with their
+  results. From there: scan frequency (1 h – 7 days) and the *Agent actif* switch (a disabled agent stops scanning and reporting until
+  re-enabled), and **Retirer de la console** (forgets the server and its certificates; refused while a renewal is in progress; a
+  running agent registers again at its next contact, so uninstall it first).
+
+The bell in the top bar raises an alert when an agent that should be running has been silent for 10 minutes (critical after 24 hours),
+and when a certificate installed on a server is about to expire or has just expired.
 
 Only agents that run continuously (background task, tray, `--daemon`) can be controlled. An agent is *online* if it was heard from in the last 3 minutes.
 
@@ -103,4 +123,4 @@ Only agents that run continuously (background task, tray, `--daemon`) can be con
 | HTTP 401 in `agent.log` | Wrong or regenerated token. |
 | Buttons greyed out | Agent older than v2.0. |
 | *Scan now* ends with "no answer from the agent" | The agent is not running continuously (one-shot mode, stopped service). Use the background task, tray or `--daemon`. |
-| Suggested controller URL looks like `169.254.x.x` | The app picked a link-local adapter address; use the machine's real IP. |
+| Suggested controller URL looks wrong | CertHelm suggests the address of the network card used to reach the network; on a machine with several cards, use the address your servers can reach. |

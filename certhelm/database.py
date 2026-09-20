@@ -118,11 +118,18 @@ def init_db():
     # Older workflow.db files have an agents table without the columns used by
     # the command channel - add them in place rather than recreating the table.
     existing = {row[1] for row in cursor.execute('PRAGMA table_info(agents)')}
+    # last_ip: address the agent connected from. cert_management: NULL = the agent never
+    # said (older version), 0/1 = whether its administrator allowed remote renewal.
     for column, ddl in (('last_seen', 'TEXT'),
                         ('enabled', 'INTEGER DEFAULT 1'),
-                        ('interval_hours', 'REAL DEFAULT 6')):
+                        ('interval_hours', 'REAL DEFAULT 6'),
+                        ('last_ip', 'TEXT'),
+                        ('cert_management', 'INTEGER')):
         if column not in existing:
             cursor.execute(f'ALTER TABLE agents ADD COLUMN {column} {ddl}')
+    # The renewal "Simulation" mode was removed: its leftover jobs never touched
+    # anything and would otherwise show up as unfinished renewals forever.
+    cursor.execute("DELETE FROM renewal_jobs WHERE mode = 'dry_run' OR status = 'simulated'")
     conn.commit()
     conn.close()
 
@@ -268,31 +275,37 @@ def get_renewal_history(domain=None, limit=200):
         for r in rows
     ]
 
-def upsert_agent(hostname, os_name, agent_version, cert_count):
+def upsert_agent(hostname, os_name, agent_version, cert_count, last_ip=None, cert_management=None):
     now = datetime.datetime.now().isoformat()
+    cm = None if cert_management is None else (1 if cert_management else 0)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO agents (hostname, os, agent_version, last_checkin, last_seen, cert_count, first_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO agents (hostname, os, agent_version, last_checkin, last_seen, cert_count, first_seen,
+                            last_ip, cert_management)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(hostname) DO UPDATE SET
             os = excluded.os,
             agent_version = excluded.agent_version,
             last_checkin = excluded.last_checkin,
             last_seen = excluded.last_seen,
-            cert_count = excluded.cert_count
-    ''', (hostname, os_name, agent_version, now, now, cert_count, now))
+            cert_count = excluded.cert_count,
+            last_ip = COALESCE(excluded.last_ip, agents.last_ip),
+            cert_management = excluded.cert_management
+    ''', (hostname, os_name, agent_version, now, now, cert_count, now, last_ip, cm))
     conn.commit()
     conn.close()
 
-def touch_agent(hostname, agent_version):
+def touch_agent(hostname, agent_version, last_ip=None, cert_management=None):
     """Heartbeat from an agent's poll. Only updates an agent that already did
     a real check-in - polling alone never creates an agent row."""
     now = datetime.datetime.now().isoformat()
+    cm = None if cert_management is None else (1 if cert_management else 0)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('UPDATE agents SET last_seen = ?, agent_version = ? WHERE hostname = ?',
-                   (now, agent_version, hostname))
+    cursor.execute('UPDATE agents SET last_seen = ?, agent_version = ?, last_ip = COALESCE(?, last_ip), '
+                   'cert_management = ? WHERE hostname = ?',
+                   (now, agent_version, last_ip, cm, hostname))
     conn.commit()
     conn.close()
 
@@ -303,7 +316,8 @@ def get_all_agents():
         SELECT a.hostname, a.os, a.agent_version, a.last_checkin, a.cert_count, a.first_seen,
                a.last_seen, COALESCE(a.enabled, 1), COALESCE(a.interval_hours, 6),
                (SELECT COUNT(*) FROM agent_commands c
-                 WHERE c.hostname = a.hostname AND c.status IN ('pending', 'delivered'))
+                 WHERE c.hostname = a.hostname AND c.status IN ('pending', 'delivered')),
+               a.last_ip, a.cert_management
         FROM agents a ORDER BY a.last_checkin DESC
     ''')
     rows = cursor.fetchall()
@@ -311,9 +325,32 @@ def get_all_agents():
     return [
         {"hostname": r[0], "os": r[1], "agent_version": r[2], "last_checkin": r[3], "cert_count": r[4],
          "first_seen": r[5], "last_seen": r[6], "enabled": bool(r[7]), "interval_hours": r[8],
-         "pending_commands": r[9]}
+         "pending_commands": r[9], "last_ip": r[10],
+         "cert_management": None if r[11] is None else bool(r[11])}
         for r in rows
     ]
+
+def delete_agent(hostname):
+    """Forgets an agent: its row, the certificates it reported and its command queue.
+    Renewal jobs are kept as history. A running agent simply registers again at its
+    next check-in. Returns True if the agent existed."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM agents WHERE hostname = ?', (hostname,))
+    existed = cursor.rowcount > 0
+    cursor.execute('DELETE FROM discovered_certs WHERE hostname = ?', (hostname,))
+    cursor.execute('DELETE FROM agent_commands WHERE hostname = ?', (hostname,))
+    conn.commit()
+    conn.close()
+    return existed
+
+def agent_is_registered(hostname):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM agents WHERE hostname = ?', (hostname,))
+    found = cursor.fetchone() is not None
+    conn.close()
+    return found
 
 def get_agent_settings(hostname):
     conn = sqlite3.connect(DB_PATH)
@@ -468,7 +505,7 @@ def set_setting(key, value):
 # A job in one of these states is finished. Anything else (including 'uncertain',
 # where a DigiCert order MAY exist) blocks a new job for the same certificate so
 # an ambiguous failure can never turn into a double purchase.
-RENEWAL_TERMINAL = ('installed', 'failed', 'cancelled', 'simulated')
+RENEWAL_TERMINAL = ('installed', 'failed', 'cancelled')
 
 _JOB_COLUMNS = ('id', 'hostname', 'domain', 'old_thumbprint', 'install_path', 'old_valid_till', 'status',
                 'message', 'mode', 'dns_names', 'digicert_order_id', 'digicert_cert_id', 'csr_pem',

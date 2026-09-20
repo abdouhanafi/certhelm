@@ -14,11 +14,13 @@ import socket
 import smtplib
 import secrets
 import hmac
+import copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from email.mime.text import MIMEText
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
+import alerts as alerts_mod
 import renewal
 import digicert_api
 from database import (
@@ -28,7 +30,8 @@ from database import (
     get_cert_snapshot, set_cert_snapshot, record_renewal, get_renewal_history,
     upsert_agent, get_all_agents, replace_discovered_certs, get_all_discovered_certs,
     touch_agent, get_agent_settings, set_agent_settings, set_setting as db_set_setting,
-    queue_command, claim_pending_commands, finish_command, get_recent_commands
+    queue_command, claim_pending_commands, finish_command, get_recent_commands,
+    delete_agent as db_delete_agent, agent_is_registered, RENEWAL_TERMINAL
 )
 
 CONFIG_FILE = "config.json"
@@ -99,6 +102,28 @@ def set_agent_token(token):
 
 URL = "https://www.digicert.com/services/v2/order/certificate"
 
+def pick_reachable_ip(candidates):
+    """First address other machines could use to reach this one: not loopback and not the
+    169.254.x.x link-local address of an unplugged network card (which hostname lookups often return)."""
+    for ip in candidates:
+        if ip and not ip.startswith(("127.", "169.254.", "0.")):
+            return ip
+    return "127.0.0.1"
+
+def guess_local_ip():
+    candidates = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))  # documentation-only address: nothing is sent, it only picks the route
+            candidates.append(s.getsockname()[0])
+    except Exception:
+        pass
+    try:
+        candidates += socket.gethostbyname_ex(socket.gethostname())[2]
+    except Exception:
+        pass
+    return pick_reachable_ip(candidates)
+
 class Api:
     def __init__(self):
         self.orders = []
@@ -108,6 +133,8 @@ class Api:
         self.balance = None
         self.audit_logs = []
         self.last_notified_count = -1
+        self.last_certs = []
+        self._digicert_alerts = []  # DigiCert-derived alerts, rebuilt on every dashboard load
         self.api_status = "Not Connected"
         self.config = load_config()
         self.api_key = get_api_key()
@@ -229,7 +256,7 @@ class Api:
         expiring = 0
         action_required = 0
         certs = []
-        notifications = []
+        digicert_alerts = []
 
         # We will keep track of active or pending certs for each domain to avoid duplicates
         # But we prioritize 'pending' over 'issued' if there are multiple.
@@ -280,8 +307,11 @@ class Api:
                 days_left = 9999 # Pending
                 
             if days_left < 0:
+                # Expired: not counted, but a certificate that just expired is exactly what must be flagged.
+                if -days_left <= alerts_mod.RECENTLY_EXPIRED_DAYS:
+                    digicert_alerts.append(alerts_mod.certificate_alert(domain, days_left, cert.get('valid_till') or ''))
                 continue
-                
+
             total += 1
                 
             product_info = cert.get('product', {})
@@ -320,11 +350,7 @@ class Api:
             
             if days_left <= 30:
                 expiring += 1
-                notifications.append({
-                    "title": f"Certificat: {domain}",
-                    "message": f"Expire dans {days_left} jour(s)",
-                    "type": "critical" if days_left <= 7 else "warning"
-                })
+                digicert_alerts.append(alerts_mod.certificate_alert(domain, days_left, valid_till_str))
             if days_left <= 7:
                 action_required += 1
 
@@ -381,11 +407,7 @@ class Api:
                 "days_left": days_left
             })
             if days_left <= 30 and days_left >= 0:
-                notifications.append({
-                    "title": f"Domaine (DCV): {name}",
-                    "message": f"Validation expire dans {days_left} jour(s)",
-                    "type": "critical" if days_left <= 7 else "warning"
-                })
+                digicert_alerts.append(alerts_mod.domain_alert(name, days_left))
                 if days_left <= 7: action_required += 1
                     
         domains_data = sorted(domains_data, key=lambda x: x['days_left'])
@@ -443,11 +465,7 @@ class Api:
                 "days_left": best_days_left
             })
             if best_days_left <= 30 and best_days_left >= 0:
-                notifications.append({
-                    "title": f"Organisation: {name}",
-                    "message": f"Validation expire dans {best_days_left} jour(s)",
-                    "type": "critical" if best_days_left <= 7 else "warning"
-                })
+                digicert_alerts.append(alerts_mod.organization_alert(name, best_days_left))
                 if best_days_left <= 7: action_required += 1
                     
         orgs_data = sorted(orgs_data, key=lambda x: x['days_left'])
@@ -493,25 +511,13 @@ class Api:
                         
             cert_dict['prerequisites'] = prereqs
 
-        # Sort notifications by urgency
-        notifications = sorted(notifications, key=lambda x: 0 if x['type'] == 'critical' else 1)
-
-        if action_required > 0 and action_required != getattr(self, 'last_notified_count', -1):
-            try:
-                from plyer import notification
-                notification.notify(
-                    title='Alerte CertHelm',
-                    message=f'Action Requise : {action_required} élément(s) critique(s) (Certificats/Domaines/Orgas).',
-                    app_name='CertHelm',
-                    timeout=10
-                )
-                self.last_notified_count = action_required
-            except Exception as e:
-                print("Notification error:", e)
+        self._digicert_alerts = digicert_alerts
+        self.last_certs = certs
+        alerts = self._compose_alerts()
+        self._notify_desktop(alerts)
 
         self.maybe_send_expiry_email_alert(certs)
         self.detect_renewals(certs)
-        self.last_certs = certs
 
         return {
             "api_status": self.api_status,
@@ -524,7 +530,8 @@ class Api:
             "users": self.users,
             "balance": self.balance,
             "audit_logs": self.audit_logs,
-            "notifications": notifications,
+            "notifications": alerts,
+            "alerts_generated_at": datetime.datetime.now().isoformat(timespec='seconds'),
             "config": {
                 "api_key_set": bool(self.api_key),
                 "api_key_masked": ('*' * (len(self.api_key) - 4) + self.api_key[-4:]) if len(self.api_key) > 4 else '****',
@@ -539,6 +546,60 @@ class Api:
                 "smtp_password_set": bool(get_smtp_password())
             }
         }
+
+    # ===== Alerts (the bell on the SSL dashboard; rules live in alerts.py) =====
+
+    @staticmethod
+    def _days_until(iso_date):
+        try:
+            return (datetime.date.fromisoformat(str(iso_date)[:10]) - datetime.date.today()).days
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _age_days(iso_time):
+        try:
+            return (datetime.datetime.now() - datetime.datetime.fromisoformat(iso_time)).total_seconds() / 86400
+        except (TypeError, ValueError):
+            return None
+
+    def _compose_alerts(self):
+        """DigiCert-derived alerts (cached from the last dashboard load) plus everything that
+        can change between two loads: agents, what they found installed, renewals, connections.
+        Cheap enough to recompute every minute."""
+        alerts = copy.deepcopy(self._digicert_alerts)
+        agents = self.get_agents()
+        disabled = {a['hostname'] for a in agents if not a.get('enabled', True)}
+        alerts += alerts_mod.connection_alerts(
+            bool(self.api_key), self.api_status, _agent_server is not None,
+            self.config.get('agent_listener_port', DEFAULT_AGENT_PORT))
+        alerts += alerts_mod.agent_alerts(agents)
+        alerts += alerts_mod.server_certificate_alerts(get_all_discovered_certs(), self._days_until, alerts, disabled)
+        alerts += alerts_mod.renewal_alerts(self._renewal.list_jobs(limit=50), self._age_days)
+        if self.last_certs:
+            alerts += alerts_mod.discovery_alert(len(self.get_discovery_summary()['unknown_to_digicert']))
+        return alerts_mod.sort_alerts(alerts)
+
+    def get_alerts(self):
+        """Light refresh for the bell (called every minute by the UI)."""
+        alerts = self._compose_alerts()
+        return {"alerts": alerts, "generated_at": datetime.datetime.now().isoformat(timespec='seconds')}
+
+    def _notify_desktop(self, alerts):
+        """One native notification each time the number of critical alerts changes."""
+        critical = [a for a in alerts if a['type'] == alerts_mod.CRITICAL]
+        if len(critical) == self.last_notified_count:
+            return
+        self.last_notified_count = len(critical)
+        if not critical or not self.config.get('notifications_enabled', True):
+            return
+        try:
+            shown = '\n'.join(f"{a['title']} - {a['message']}" for a in critical[:3])
+            more = f"\n... et {len(critical) - 3} autre(s)" if len(critical) > 3 else ''
+            notification.notify(title=f'CertHelm : {len(critical)} alerte(s) critique(s)',
+                                message=(shown + more)[:250], app_name='CertHelm', timeout=10)
+        except Exception as e:
+            print("Notification error:", e)
 
     def save_settings(self, new_config):
         # Store API key securely in Windows Credential Manager
@@ -798,10 +859,7 @@ class Api:
         same pattern as the DigiCert API key."""
         token = get_agent_token()
         port = self.config.get('agent_listener_port', DEFAULT_AGENT_PORT)
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-        except Exception:
-            local_ip = '127.0.0.1'
+        local_ip = guess_local_ip()
         return {
             "token_masked": ('*' * max(0, len(token) - 6)) + token[-6:],
             "listener_port": port,
@@ -885,6 +943,22 @@ class Api:
     def get_agent_commands(self, hostname):
         return get_recent_commands(hostname)
 
+    def get_agent_certs(self, hostname):
+        """Certificates this agent found on its server at its last scan."""
+        return [c for c in get_all_discovered_certs() if c['hostname'] == hostname]
+
+    def delete_agent(self, hostname):
+        """Removes an agent from the console (server decommissioned, agent uninstalled...).
+        A running agent would just register again, so this is refused while a renewal
+        is in progress on that server."""
+        if not self._find_agent(hostname):
+            return {"status": "error", "message": "Agent inconnu"}
+        if any(j['hostname'] == hostname and j['status'] not in RENEWAL_TERMINAL
+               for j in self._renewal.list_jobs(limit=200)):
+            return {"status": "error", "message": "Un renouvellement est en cours sur ce serveur : annulez-le d'abord."}
+        db_delete_agent(hostname)
+        return {"status": "success"}
+
     # ===== Certificate renewal (see renewal.py for the workflow and its safety rules) =====
 
     def _orders_loaded(self):
@@ -911,6 +985,9 @@ class Api:
 
     def get_certificates_overview(self):
         return self._renewal.certificates_overview()
+
+    def preview_renewal(self, hostname, thumbprint):
+        return self._renewal.preview(hostname, thumbprint)
 
     def start_renewal(self, hostname, thumbprint):
         return self._renewal.start(hostname, thumbprint)
@@ -956,17 +1033,17 @@ class Api:
 
     # ===== Window controls (frameless window - see __main__) =====
     def minimize_window(self):
-        self.window.minimize()
+        self._window.minimize()
 
     def close_window(self):
-        self.window.destroy()
+        self._window.destroy()
 
     def toggle_maximize_window(self):
         if getattr(self, '_is_maximized', False):
-            self.window.restore()
+            self._window.restore()
             self._is_maximized = False
         else:
-            self.window.maximize()
+            self._window.maximize()
             self._is_maximized = True
 
 
@@ -1029,8 +1106,25 @@ class AgentCheckinHandler(BaseHTTPRequestHandler):
             self._handle_poll()
         elif self.path == '/agent/command_result':
             self._handle_command_result()
+        elif self.path == '/agent/verify':
+            self._handle_verify()
         else:
             self._send_json(404, {"status": "error", "message": "Not found"})
+
+    @staticmethod
+    def _cert_management_flag(payload):
+        """True/False as reported by the agent (its administrator's opt-in); None if it did not say."""
+        value = payload.get('cert_management')
+        return value if isinstance(value, bool) else None
+
+    def _handle_verify(self):
+        """Lets the agent installer check the token and see whether this server is already
+        registered, without creating or changing anything."""
+        payload = self._read_authenticated_json()
+        if payload is None:
+            return
+        hostname = str(payload.get('hostname', ''))[:255].strip()
+        self._send_json(200, {"status": "success", "registered": bool(hostname) and agent_is_registered(hostname)})
 
     def _handle_poll(self):
         """Lightweight heartbeat: the agent asks 'anything for me?' and gets its
@@ -1044,7 +1138,8 @@ class AgentCheckinHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"status": "error", "message": "Missing hostname"})
             return
         try:
-            touch_agent(hostname, str(payload.get('agent_version', ''))[:50].strip())
+            touch_agent(hostname, str(payload.get('agent_version', ''))[:50].strip(),
+                        self.client_address[0], self._cert_management_flag(payload))
             commands = claim_pending_commands(hostname, ALLOWED_AGENT_COMMANDS)
             self._send_json(200, {"status": "success", "settings": get_agent_settings(hostname), "commands": commands})
         except Exception as e:
@@ -1103,7 +1198,8 @@ class AgentCheckinHandler(BaseHTTPRequestHandler):
             })
 
         try:
-            upsert_agent(hostname, os_name, agent_version, len(certs))
+            upsert_agent(hostname, os_name, agent_version, len(certs),
+                         self.client_address[0], self._cert_management_flag(payload))
             replace_discovered_certs(hostname, certs)
         except Exception as e:
             self._send_json(500, {"status": "error", "message": str(e)})
@@ -1150,7 +1246,7 @@ if __name__ == '__main__':
     t.start()
 
     # Advances renewal jobs (order status polling, hand-off to agents). Does nothing
-    # unless a job exists, and jobs are only created in "Réel" mode.
+    # unless a job exists, and jobs only exist after an explicit, confirmed "Renouveler".
     threading.Thread(target=api._renewal.run_forever, daemon=True).start()
 
     # Écouteur pour les check-ins des agents (Option A: agents -> app centrale).
@@ -1158,12 +1254,8 @@ if __name__ == '__main__':
     get_agent_token()
     start_agent_listener(api.config.get('agent_listener_port', DEFAULT_AGENT_PORT))
 
-    # NOTE: frameless=True a ete tente ici pour un style macOS, mais declenche
-    # une recursion infinie dans le pont d'accessibilite WinForms/WebView2 de
-    # Windows (window.native.AccessibilityObject.Bounds qui boucle sur
-    # lui-meme -> stack overflow -> fenetre gelee/"ne repond pas"). Reproduit
-    # et confirme en local. Reste sur une fenetre standard tant que ce
-    # probleme pywebview/WebView2 n'est pas contourne differemment.
+    # NOTE: la fenetre reste standard (pas de frameless). Si un jour on la reessaie, ne
+    # JAMAIS exposer l'objet fenetre dans un attribut public de l'Api (voir _window plus bas).
 
     # Création de la fenêtre
     window = webview.create_window(
@@ -1175,5 +1267,8 @@ if __name__ == '__main__':
         min_size=(900, 600),
         background_color='#0f172a'
     )
-    api.window = window
+    # Private on purpose: pywebview walks every public attribute of js_api to expose it to
+    # JavaScript, and recurses forever into the native window object (RecursionError, the UI
+    # never becomes ready and the splash screen stays frozen).
+    api._window = window
     webview.start()

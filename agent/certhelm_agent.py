@@ -58,7 +58,7 @@ import datetime
 import urllib.request
 import urllib.error
 
-AGENT_VERSION = "2.1"
+AGENT_VERSION = "2.2"
 DEFAULT_PROBE_PORTS = [443, 8443]
 
 # Once compiled with PyInstaller, __file__ points inside the temporary
@@ -159,6 +159,17 @@ LINUX_SCAN_DIRS = [
 CERT_EXTENSIONS = (".pem", ".crt", ".cer")
 
 
+def _openssl_date_to_iso(text):
+    """openssl prints e.g. "Dec  1 23:59:59 2026 GMT": turn it into 2026-12-01. Pure Python, so it
+    behaves the same on every system (no dependence on GNU `date`); the raw text is kept if it
+    cannot be read, rather than losing the certificate."""
+    text = (text or "").strip()
+    try:
+        return datetime.datetime.strptime(text.replace(" GMT", ""), "%b %d %H:%M:%S %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return text
+
+
 def parse_cert_with_openssl(path):
     try:
         result = subprocess.run(
@@ -178,12 +189,7 @@ def parse_cert_with_openssl(path):
         domain = extract_cn(subject.group(1))
         valid_till = ""
         if enddate:
-            # openssl gives e.g. "Dec 31 23:59:59 2026 GMT" - reformat to ISO via date if possible
-            try:
-                conv = subprocess.run(["date", "-d", enddate.group(1), "+%Y-%m-%d"], capture_output=True, text=True, timeout=5)
-                valid_till = conv.stdout.strip() if conv.returncode == 0 else enddate.group(1)
-            except Exception:
-                valid_till = enddate.group(1)
+            valid_till = _openssl_date_to_iso(enddate.group(1))
 
         return {
             "domain": domain,
@@ -262,16 +268,20 @@ def _post_json(controller_url, token, path, payload, timeout=15):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def send_checkin(controller_url, token, hostname, os_name, certs):
-    """Returns the controller's reply (a non-empty dict) on success, None on failure."""
+def send_checkin(controller_url, token, hostname, os_name, certs, cert_management=None):
+    """Returns the controller's reply (a non-empty dict) on success, None on failure.
+    cert_management tells the console whether this server's administrator allowed remote renewal."""
     url = _base_url(controller_url) + "/agent/checkin"
+    payload = {
+        "hostname": hostname,
+        "os": os_name,
+        "agent_version": AGENT_VERSION,
+        "certs": certs
+    }
+    if cert_management is not None:
+        payload["cert_management"] = bool(cert_management)
     try:
-        body = _post_json(controller_url, token, "/agent/checkin", {
-            "hostname": hostname,
-            "os": os_name,
-            "agent_version": AGENT_VERSION,
-            "certs": certs
-        })
+        body = _post_json(controller_url, token, "/agent/checkin", payload)
         print(f"[OK] Check-in reussi: {body}")
         return body or None
     except urllib.error.HTTPError as e:
@@ -816,7 +826,8 @@ class AgentRunner:
         with self._scan_lock:
             self.on_state("running", "Scan en cours...")
             os_label, certs = run_single_scan()
-            reply = send_checkin(self.controller_url, self.token, self.hostname, os_label, certs)
+            reply = send_checkin(self.controller_url, self.token, self.hostname, os_label, certs,
+                                 cert_management=self.allow_cert_management)
             self.last_scan = time.monotonic()
             self.last_run = datetime.datetime.now().strftime("%H:%M:%S")
             self.last_count = len(certs)
@@ -883,7 +894,8 @@ class AgentRunner:
     def poll_once(self):
         try:
             reply = _post_json(self.controller_url, self.token, "/agent/poll", {
-                "hostname": self.hostname, "agent_version": AGENT_VERSION
+                "hostname": self.hostname, "agent_version": AGENT_VERSION,
+                "cert_management": self.allow_cert_management
             })
         except Exception as e:
             # Log a given failure once, not every 30s for as long as the controller is down.
@@ -904,9 +916,15 @@ class AgentRunner:
 
     def loop(self):
         while True:
-            self.poll_once()
-            if self.scan_due():
-                self.do_scan()
+            # A surprise in one pass (odd certificate store, disk error...) must never end the
+            # agent: it is the only thing that keeps a server visible in the console.
+            try:
+                self.poll_once()
+                if self.scan_due():
+                    self.do_scan()
+            except Exception as e:
+                print(f"[ERREUR] Passage ignore, l'agent continue : {e}")
+                self.on_state("error", f"Erreur inattendue : {e}"[:100])
             time.sleep(POLL_SECONDS)
 
 
@@ -1056,7 +1074,8 @@ def main():
         print("[INFO] --dry-run: rien envoye au serveur.")
         return
 
-    send_checkin(args.controller_url, args.token, args.hostname, os_label, certs)
+    send_checkin(args.controller_url, args.token, args.hostname, os_label, certs,
+                 cert_management=cert_management_enabled())
 
 
 if __name__ == "__main__":

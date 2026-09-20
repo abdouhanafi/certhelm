@@ -352,15 +352,28 @@ async function loadDashboard() {
     // Show skeleton while loading
     showSkeletonCerts();
     
-    const data = await pywebview.api.get_dashboard_data();
-    
-    // Hide splash screen on first load
-    const splash = document.getElementById('splash-screen');
-    if (splash && !splash.classList.contains('hidden')) {
-        splash.classList.add('hidden');
-        setTimeout(() => { if(splash.parentNode) splash.parentNode.removeChild(splash); }, 700);
+    const hideSplash = () => {
+        const splash = document.getElementById('splash-screen');
+        if (splash && !splash.classList.contains('hidden')) {
+            splash.classList.add('hidden');
+            setTimeout(() => { if(splash.parentNode) splash.parentNode.removeChild(splash); }, 700);
+        }
+    };
+
+    let data;
+    try {
+        data = await pywebview.api.get_dashboard_data();
+    } catch (e) {
+        // Never leave the splash screen up for ever: show the app so the error is visible.
+        console.error('get_dashboard_data failed', e);
+        hideSplash();
+        showToast('Impossible de charger les données : ' + (e && e.message ? e.message : e), 'error');
+        return;
     }
-    
+
+    // Hide splash screen on first load
+    hideSplash();
+
     updateApiBadge(data.api_status);
     
     const balanceBadge = document.getElementById('balance-badge');
@@ -423,7 +436,7 @@ async function loadDashboard() {
         setupSorting();
         window.sortingInitialized = true;
     }
-    updateNotifications(data.notifications || []);
+    updateNotifications(data.notifications || [], data.alerts_generated_at);
 }
 
 function drawDonutChart(active, expiring, critical, pending) {
@@ -535,71 +548,146 @@ document.addEventListener('click', (e) => {
     }
 });
 
-let _lastNotifications = [];
+// ===== ALERT CENTRE (the bell) =====
+// Alerts are built server-side (alerts.py) as {category, type, title, message, target} and
+// cover DigiCert expiries, certificates found installed on servers, agents that went
+// offline, failed renewals and broken connections. The bell refreshes itself every minute
+// so an agent dropping off shows up without reloading the dashboard.
 
-function updateNotifications(notifications) {
+const ALERT_CATEGORY_LABELS = {
+    certificate: 'Certificat', domain: 'Domaine', organization: 'Organisation', server: 'Serveur',
+    agent: 'Agent', renewal: 'Renouvellement', connection: 'Connexion', discovery: 'Découverte'
+};
+const ALERT_TYPE_LABELS = { critical: 'critique(s)', warning: 'avertissement(s)', info: 'info(s)' };
+const ALERT_ACTION_LABELS = {
+    cert: 'Voir le détail', domain: 'Voir dans le tableau', org: 'Voir dans le tableau',
+    agent: 'Ouvrir Agents & Découverte', settings: 'Ouvrir les Paramètres'
+};
+
+let _lastNotifications = [];
+let _alertFilter = 'all';
+let _alertsGeneratedAt = null;
+let _alertsTimer = null;
+let pendingAgentFocus = null;
+
+function updateNotifications(alerts, generatedAt) {
+    _lastNotifications = Array.isArray(alerts) ? alerts : [];
+    if (generatedAt) _alertsGeneratedAt = generatedAt;
+    renderAlerts();
+}
+
+function renderAlerts() {
     const countBadge = document.getElementById('notification-count');
     const headerCount = document.getElementById('dropdown-count');
     const list = document.getElementById('notification-list');
+    if (!headerCount || !list) return;
 
-    if(!headerCount) return;
-    _lastNotifications = notifications;
+    const counts = { critical: 0, warning: 0, info: 0 };
+    _lastNotifications.forEach(a => { if (counts[a.type] !== undefined) counts[a.type]++; });
+    const attention = counts.critical + counts.warning;
 
-    headerCount.innerText = notifications.length;
-    if (notifications.length > 0) {
-        countBadge.style.display = 'flex';
-        countBadge.innerText = notifications.length;
+    headerCount.innerText = _lastNotifications.length;
+    document.getElementById('alert-summary').innerHTML = ['critical', 'warning', 'info']
+        .filter(t => counts[t] > 0)
+        .map(t => `<span class="alert-chip ${t}">${counts[t]} ${ALERT_TYPE_LABELS[t]}</span>`).join('');
 
-        list.innerHTML = notifications.map((n, idx) => {
-            const clickable = !!parseNotificationTarget(n.title);
+    // The badge is for things that need a human; a passing "renewal succeeded" info must not nag.
+    countBadge.style.display = attention > 0 ? 'flex' : 'none';
+    countBadge.innerText = attention;
+    countBadge.classList.toggle('warning', counts.critical === 0 && counts.warning > 0);
+
+    document.querySelectorAll('#alert-filters [data-alert-filter]').forEach(btn => {
+        const f = btn.dataset.alertFilter;
+        const base = { all: 'Toutes', critical: 'Critiques', warning: 'Avertissements', info: 'Infos' }[f];
+        const n = f === 'all' ? _lastNotifications.length : counts[f];
+        btn.textContent = `${base} (${n})`;
+        btn.classList.toggle('active', f === _alertFilter);
+    });
+
+    const shown = _lastNotifications
+        .map((a, idx) => ({ a, idx }))
+        .filter(({ a }) => _alertFilter === 'all' || a.type === _alertFilter);
+
+    if (_lastNotifications.length === 0) {
+        list.innerHTML = `<div class="dropdown-empty">Tout est en ordre.<br><span style="font-size:11px;">Certificats, agents, renouvellements et connexions vérifiés : rien à signaler.</span></div>`;
+    } else if (shown.length === 0) {
+        list.innerHTML = `<div class="dropdown-empty">Aucune alerte de ce niveau.</div>`;
+    } else {
+        list.innerHTML = shown.map(({ a, idx }) => {
+            const clickable = !!(a.target && ALERT_ACTION_LABELS[a.target.kind]);
             return `
-            <div class="dropdown-item ${escapeHtml(n.type)}" data-notif-idx="${idx}" style="${clickable ? 'cursor:pointer;' : ''}">
-                <span class="di-title">${escapeHtml(n.title)}</span>
-                <span class="di-msg">${escapeHtml(n.message)}</span>
-                ${clickable ? '<span class="di-action">Voir le détail →</span>' : ''}
-            </div>
-        `;
+            <div class="dropdown-item ${escapeHtml(a.type)}" data-notif-idx="${idx}" style="${clickable ? 'cursor:pointer;' : ''}">
+                <div class="di-top">
+                    <span class="di-title">${escapeHtml(a.title)}</span>
+                    <span class="di-tag">${escapeHtml(ALERT_CATEGORY_LABELS[a.category] || a.category || '')}</span>
+                </div>
+                <span class="di-msg">${escapeHtml(a.message)}</span>
+                ${clickable ? `<span class="di-action">${escapeHtml(ALERT_ACTION_LABELS[a.target.kind])} →</span>` : ''}
+            </div>`;
         }).join('');
-
         list.querySelectorAll('.dropdown-item').forEach(el => {
             el.addEventListener('click', () => handleNotificationClick(_lastNotifications[parseInt(el.dataset.notifIdx, 10)]));
         });
-    } else {
-        countBadge.style.display = 'none';
-        list.innerHTML = `<div class="dropdown-empty">Aucune alerte pour le moment.</div>`;
+    }
+
+    const updated = document.getElementById('alerts-updated');
+    if (updated) {
+        updated.textContent = _alertsGeneratedAt
+            ? `Actualisé à ${new Date(_alertsGeneratedAt).toLocaleTimeString('fr-FR')}`
+            : 'Jamais actualisé';
     }
 }
 
-// Alerts are generated server-side as "Certificat: X", "Domaine (DCV): X" or
-// "Organisation: X" — parsed back here so clicking one actually takes you to
-// the relevant record instead of just sitting there as a static list.
-function parseNotificationTarget(title) {
-    if (title.startsWith('Certificat: ')) return { kind: 'cert', value: title.slice('Certificat: '.length) };
-    if (title.startsWith('Domaine (DCV): ')) return { kind: 'domain', value: title.slice('Domaine (DCV): '.length) };
-    if (title.startsWith('Organisation: ')) return { kind: 'org', value: title.slice('Organisation: '.length) };
-    return null;
+async function refreshAlerts() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+        const res = await pywebview.api.get_alerts();
+        updateNotifications(res.alerts, res.generated_at);
+    } catch (e) { /* a missed refresh is harmless: the next one runs in a minute */ }
 }
 
+function startAlertRefresh() {
+    clearInterval(_alertsTimer);
+    _alertsTimer = setInterval(refreshAlerts, 60000);
+}
+
+document.getElementById('alert-filters').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-alert-filter]');
+    if (!btn) return;
+    _alertFilter = btn.dataset.alertFilter;
+    renderAlerts();
+});
+
+document.getElementById('alerts-refresh-btn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    await refreshAlerts();
+    btn.disabled = false;
+});
+
 function handleNotificationClick(n) {
-    if (!n) return;
-    const target = parseNotificationTarget(n.title);
-    if (!target) return;
-
+    if (!n || !n.target) return;
+    const target = n.target;
     document.getElementById('notification-dropdown').classList.remove('active');
-    // We already have fresh data from the load that produced this alert — no need to refetch.
-    switchView('dashboard', { skipDataReload: true });
 
-    if (target.kind === 'cert') {
-        document.querySelector('.main-tab[data-target="certs-view"]').click();
-        showDetails(target.value);
-    } else if (target.kind === 'domain') {
-        document.querySelector('.main-tab[data-target="domains-view"]').click();
-        document.getElementById('search-input').value = target.value;
-        applyFilters();
-    } else if (target.kind === 'org') {
-        document.querySelector('.main-tab[data-target="orgs-view"]').click();
-        document.getElementById('search-input').value = target.value;
-        applyFilters();
+    if (target.kind === 'cert' || target.kind === 'domain' || target.kind === 'org') {
+        // We already have fresh data from the load that produced this alert — no need to refetch.
+        switchView('dashboard', { skipDataReload: true });
+        if (target.kind === 'cert') {
+            document.querySelector('.main-tab[data-target="certs-view"]').click();
+            showDetails(target.value);
+        } else {
+            document.querySelector(`.main-tab[data-target="${target.kind === 'domain' ? 'domains-view' : 'orgs-view'}"]`).click();
+            document.getElementById('search-input').value = target.value;
+            applyFilters();
+        }
+    } else if (target.kind === 'agent') {
+        pendingAgentFocus = target.value || null;
+        switchView('agents');
+    } else if (target.kind === 'settings') {
+        switchView('settings');
+        const anchor = document.getElementById(target.value === 'agents' ? 'agent-listener-url' : 'setting-api-key');
+        if (anchor) setTimeout(() => { anchor.scrollIntoView({ behavior: 'smooth', block: 'center' }); anchor.focus(); }, 150);
     }
 }
 
@@ -1071,6 +1159,7 @@ window.exportCSV = function() {
 
 window.addEventListener('pywebviewready', function() {
     loadDashboard();
+    startAlertRefresh();
 });
 
 // ===== Side Panel Details =====
@@ -1899,7 +1988,7 @@ async function renderCompliance() {
 
 // ===== AGENTS & DISCOVERY =====
 // Backed by main.py's embedded HTTP listener (Api.get_agents / get_discovery_summary)
-// and by the standalone agent scripts shipped in agents/ next to the app.
+// and by CertHelmAgent.exe / certhelm_agent.py running on the servers.
 
 async function loadAgentSettingsInfo() {
     const urlInput = document.getElementById('agent-listener-url');
@@ -1941,6 +2030,56 @@ function relativeTimeFromHours(hours) {
     return `il y a ${Math.round(hours / 24)}j`;
 }
 
+function relativeTimeFromSeconds(seconds) {
+    if (seconds === null || seconds === undefined) return 'Jamais';
+    if (seconds < 90) return `il y a ${Math.max(0, Math.round(seconds))} s`;
+    if (seconds < 3600) return `il y a ${Math.round(seconds / 60)} min`;
+    return relativeTimeFromHours(seconds / 3600);
+}
+
+function agentFormatDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d) ? '—' : d.toLocaleString('fr-FR');
+}
+
+function agentDaysUntil(dateStr) {
+    const d = new Date(String(dateStr || '').slice(0, 10) + 'T00:00:00');
+    if (isNaN(d)) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((d - today) / 86400000);
+}
+
+async function copyText(text, okMessage) {
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast(okMessage || 'Copié', 'success');
+    } catch (e) {
+        showToast('Copie impossible : sélectionnez le texte et copiez-le à la main.', 'error');
+    }
+}
+
+async function renderAgentInstallCard() {
+    const el = document.getElementById('agent-install-card');
+    if (!el || !window.pywebview) return;
+    let url = '';
+    try { url = (await pywebview.api.get_agent_config()).listener_url_hint; } catch (e) { /* card still useful without it */ }
+    el.innerHTML = `
+        <ol style="margin:0; padding-left:20px;">
+            <li>Remettez <strong>CertHelmAgent_Setup.exe</strong> à l'administrateur du serveur (un seul fichier, à lancer en administrateur).</li>
+            <li>Il y saisit l'adresse de CertHelm <code id="agent-install-url" style="user-select:all;">${escapeHtml(url)}</code>
+                <button class="btn-primary-action" id="agent-copy-url-btn" style="margin-left:6px; padding:2px 10px;">Copier</button>
+                et le jeton (<a href="#" id="agent-goto-token" style="color:var(--accent-btn);">Paramètres → Agents &amp; Découverte</a>, bouton « Régénérer le token » : il n'est affiché qu'une fois).</li>
+            <li>Il clique <strong>Installer</strong> : l'agent démarre avec Windows et le serveur apparaît dans la liste ci-dessous en quelques secondes.</li>
+        </ol>`;
+    document.getElementById('agent-copy-url-btn').addEventListener('click', () => copyText(url, "Adresse copiée"));
+    document.getElementById('agent-goto-token').addEventListener('click', (e) => {
+        e.preventDefault();
+        handleNotificationClick({ target: { kind: 'settings', value: 'agents' } });
+    });
+}
+
 async function renderAgents() {
     const statsRow = document.getElementById('agents-stats-row');
     const agentsList = document.getElementById('agents-list');
@@ -1952,6 +2091,7 @@ async function renderAgents() {
     agentsList.innerHTML = '';
     notInstalledList.innerHTML = '';
     unknownList.innerHTML = '';
+    renderAgentInstallCard();
 
     let agents, summary;
     try {
@@ -1964,7 +2104,7 @@ async function renderAgents() {
         return;
     }
 
-    const onlineCount = agents.filter(a => a.online).length;
+    const onlineCount = agents.filter(a => a.enabled && a.online).length;
 
     statsRow.innerHTML = `
         <div class="stat-card">
@@ -1986,22 +2126,29 @@ async function renderAgents() {
     `;
 
     if (agents.length === 0) {
-        agentsList.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:20px;">Aucun agent n'a encore fait de check-in. Voir <code>docs/agents.md</code> pour l'installation.</div>`;
+        agentsList.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:20px;">Aucun agent n'a encore fait de check-in. Suivez les étapes de « Installer un agent sur un serveur » ci-dessus.</div>`;
     } else {
         agentsCache = agents;
         agentsList.innerHTML = agents.map((a, i) => {
             const dotColor = !a.enabled ? '#6b7280' : (a.online ? '#10b981' : '#ef4444');
-            const subtitle = !a.supports_commands
-                ? `${escapeHtml(a.os || 'OS inconnu')} · <span style="color:#f59e0b;">ancienne version — pas de pilotage à distance</span>`
-                : `${escapeHtml(a.os || 'OS inconnu')}${a.enabled ? '' : ' · <span style="color:#f59e0b;">désactivé</span>'}${a.pending_commands ? ' · <span style="color:var(--accent-color, #009FDF);">commande en attente…</span>' : ''}`;
+            const statusText = !a.enabled ? 'Désactivé' : (a.online ? 'En ligne' : 'Hors ligne');
+            const parts = [escapeHtml(a.os || 'OS inconnu')];
+            if (a.last_ip) parts.push(escapeHtml(a.last_ip));
+            if (!a.supports_commands) {
+                parts.push('<span style="color:#f59e0b;">ancienne version — pas de pilotage à distance</span>');
+            } else if (a.pending_commands) {
+                parts.push('<span style="color:var(--accent-color, #009FDF);">commande en attente…</span>');
+            }
+            if (a.cert_management === true) parts.push('<span style="color:#10b981;">renouvellement autorisé</span>');
+            else if (a.cert_management === false) parts.push('renouvellement non autorisé');
             return `
-            <div class="agent-block" style="margin-bottom:10px;">
+            <div class="agent-block" data-agent-host="${escapeHtml(a.hostname)}" style="margin-bottom:10px;">
                 <div class="cert-card" style="flex-wrap:wrap; gap:10px;">
-                    <div style="flex:2; min-width:180px; display:flex; align-items:center; gap:10px;">
+                    <div style="flex:2; min-width:200px; display:flex; align-items:center; gap:10px;">
                         <div style="width:8px; height:8px; border-radius:50%; background:${dotColor}; flex-shrink:0;"></div>
                         <div>
-                            <div style="font-weight:500; color:var(--text-bright);">${escapeHtml(a.hostname)}</div>
-                            <div style="font-size:11px; color:var(--text-muted-dark);">${subtitle}</div>
+                            <div style="font-weight:500; color:var(--text-bright);">${escapeHtml(a.hostname)} <span style="font-size:11px; font-weight:500; color:${dotColor};">${statusText}</span></div>
+                            <div style="font-size:11px; color:var(--text-muted-dark);">${parts.join(' · ')}</div>
                         </div>
                     </div>
                     <div style="flex:1; min-width:120px; font-size:12px; color:var(--text-muted);">Dernier scan : ${relativeTimeFromHours(a.hours_since_checkin)}</div>
@@ -2009,7 +2156,7 @@ async function renderAgents() {
                     <div style="flex:1; min-width:50px; font-size:11px; color:var(--text-muted-dark);">v${escapeHtml(a.agent_version || '?')}</div>
                     <div style="display:flex; gap:8px; flex-shrink:0; position:relative; z-index:1;">
                         <button class="btn-primary-action" data-agent-action="scan" data-agent-index="${i}" ${(a.supports_commands && a.enabled) ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'}>Scanner maintenant</button>
-                        <button class="btn-primary-action" data-agent-action="settings" data-agent-index="${i}" ${a.supports_commands ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'}>Réglages</button>
+                        <button class="btn-primary-action" data-agent-action="details" data-agent-index="${i}">Détails</button>
                     </div>
                 </div>
                 <div class="agent-settings-panel" id="agent-panel-${i}" style="display:none; border:1px solid var(--border-light); border-top:none; border-radius:0 0 12px 12px; padding:16px 20px; background:var(--card-bg);"></div>
@@ -2043,15 +2190,33 @@ async function renderAgents() {
     }
 
     renderRenewals();
+    focusPendingAgent();
 }
 
-// ===== AGENT CONTROL (scan now / remote settings) =====
+// Coming from an alert ("Agent hors ligne", a failed renewal...): scroll to that server and flash it.
+function focusPendingAgent() {
+    if (!pendingAgentFocus) return;
+    const block = Array.from(document.querySelectorAll('[data-agent-host]'))
+        .find(el => el.dataset.agentHost === pendingAgentFocus);
+    pendingAgentFocus = null;
+    if (!block) return;
+    block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    block.style.transition = 'box-shadow 0.4s';
+    block.style.boxShadow = '0 0 0 2px #009FDF';
+    setTimeout(() => { block.style.boxShadow = ''; }, 2200);
+}
+
+// ===== AGENT CONTROL (scan now / remote settings / details) =====
 // Commands are queued on the controller and picked up by the agent the next time
 // it polls (every ~30s) - the controller never connects out to the agent.
 
 let agentsCache = [];
 const AGENT_INTERVAL_CHOICES = [1, 2, 6, 12, 24, 72, 168];
-const AGENT_COMMAND_LABELS = { scan_now: 'Scan immédiat' };
+const AGENT_COMMAND_LABELS = {
+    scan_now: 'Scan immédiat',
+    generate_csr: 'Préparation de la demande de certificat',
+    install_cert: 'Installation du certificat'
+};
 const AGENT_STATUS_LABELS = { pending: 'En attente', delivered: 'Envoyée', done: 'Terminée', failed: 'Échec' };
 
 function formatAgentInterval(hours) {
@@ -2065,7 +2230,7 @@ document.addEventListener('click', (event) => {
     const agent = agentsCache[Number(btn.dataset.agentIndex)];
     if (!agent) return;
     if (btn.dataset.agentAction === 'scan') requestAgentScan(agent, btn);
-    else if (btn.dataset.agentAction === 'settings') toggleAgentSettings(agent, Number(btn.dataset.agentIndex));
+    else if (btn.dataset.agentAction === 'details') toggleAgentDetails(agent, Number(btn.dataset.agentIndex));
 });
 
 async function requestAgentScan(agent, btn) {
@@ -2093,6 +2258,7 @@ async function requestAgentScan(agent, btn) {
         showToast('Erreur lors de la demande de scan', 'error');
     }
     renderAgents();
+    refreshAlerts();
 }
 
 // Polls the command's status until the agent reports back (or ~2 minutes pass).
@@ -2109,7 +2275,11 @@ async function waitForAgentCommand(hostname, commandId) {
     return null;
 }
 
-async function toggleAgentSettings(agent, index) {
+function agentInfoRow(label, valueHtml) {
+    return `<div style="display:flex; gap:10px; padding:3px 0;"><span style="flex:0 0 150px; color:var(--text-muted-dark);">${label}</span><span style="color:var(--text-bright); min-width:0; overflow-wrap:anywhere;">${valueHtml}</span></div>`;
+}
+
+async function toggleAgentDetails(agent, index) {
     const panel = document.getElementById(`agent-panel-${index}`);
     if (!panel) return;
     if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
@@ -2118,8 +2288,17 @@ async function toggleAgentSettings(agent, index) {
         ? AGENT_INTERVAL_CHOICES
         : [...AGENT_INTERVAL_CHOICES, agent.interval_hours].sort((a, b) => a - b);
 
-    panel.innerHTML = `
-        <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end;">
+    const renewalText = agent.cert_management === true
+        ? '<span style="color:#10b981;">Autorisé par l\'administrateur du serveur</span>'
+        : (agent.cert_management === false
+            ? 'Non autorisé — à activer en réinstallant l\'agent avec la case « Autoriser CertHelm à renouveler »'
+            : 'Inconnu (l\'agent ne l\'a pas encore indiqué)');
+    const alive = agent.supports_commands && agent.seconds_since_seen !== undefined
+        ? relativeTimeFromSeconds(agent.seconds_since_seen)
+        : relativeTimeFromHours(agent.hours_since_checkin);
+
+    const controls = agent.supports_commands ? `
+        <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end; margin-top:14px;">
             <div>
                 <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">Fréquence de scan automatique</label>
                 <select class="form-input" id="agent-interval-${index}" style="width:auto; min-width:170px; margin-top:0;">
@@ -2134,13 +2313,34 @@ async function toggleAgentSettings(agent, index) {
         </div>
         <div style="font-size:11px; color:var(--text-muted-dark); margin-top:8px;">
             Pris en compte au prochain contact de l'agent (moins de 30 s). Un agent désactivé ne scanne plus et n'envoie plus rien tant qu'il n'est pas réactivé.
+        </div>` : `
+        <div style="font-size:12px; color:#f59e0b; margin-top:14px;">Cet agent est une ancienne version : réinstallez la dernière version avec CertHelmAgent_Setup.exe pour pouvoir le piloter d'ici.</div>`;
+
+    panel.innerHTML = `
+        <div style="font-size:12px;">
+            ${agentInfoRow('Nom du serveur', escapeHtml(agent.hostname))}
+            ${agentInfoRow('Système', escapeHtml(agent.os || 'Inconnu'))}
+            ${agentInfoRow('Adresse IP', escapeHtml(agent.last_ip || '—'))}
+            ${agentInfoRow("Version de l'agent", 'v' + escapeHtml(agent.agent_version || '?'))}
+            ${agentInfoRow('Premier contact', escapeHtml(agentFormatDate(agent.first_seen)))}
+            ${agentInfoRow('Dernier scan', escapeHtml(agentFormatDate(agent.last_checkin)))}
+            ${agentInfoRow('Dernier signe de vie', escapeHtml(alive))}
+            ${agentInfoRow('Renouvellement automatique', renewalText)}
         </div>
-        <div style="font-size:12px; color:var(--text-muted); margin:14px 0 6px;">Dernières commandes</div>
+        ${controls}
+        <div style="font-size:12px; color:var(--text-muted); margin:16px 0 6px;">Certificats détectés sur ce serveur</div>
+        <div id="agent-certs-${index}" style="font-size:12px; color:var(--text-muted-dark);">Chargement…</div>
+        <div style="font-size:12px; color:var(--text-muted); margin:16px 0 6px;">Dernières commandes</div>
         <div id="agent-history-${index}" style="font-size:12px; color:var(--text-muted-dark);">Chargement…</div>
+        <div style="margin-top:18px; padding-top:12px; border-top:1px solid var(--border-ultralight); display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <button class="btn-primary-action" id="agent-delete-${index}" style="color:#ef4444; border-color:rgba(239,68,68,0.4);">Retirer de la console</button>
+            <span style="font-size:11px; color:var(--text-muted-dark);">Oublie ce serveur et ses certificats. Si l'agent tourne encore, il se ré-enregistrera à son prochain contact : désinstallez-le d'abord sur le serveur.</span>
+        </div>
     `;
     panel.style.display = 'block';
 
-    document.getElementById(`agent-save-${index}`).addEventListener('click', async () => {
+    const saveBtn = document.getElementById(`agent-save-${index}`);
+    if (saveBtn) saveBtn.addEventListener('click', async () => {
         const interval = Number(document.getElementById(`agent-interval-${index}`).value);
         const enabled = document.getElementById(`agent-enabled-${index}`).checked;
         try {
@@ -2148,6 +2348,7 @@ async function toggleAgentSettings(agent, index) {
             if (res.status === 'success') {
                 showToast(`Réglages enregistrés pour ${escapeHtml(agent.hostname)}`, 'success');
                 renderAgents();
+                refreshAlerts();
             } else {
                 showToast(res.message || 'Réglages refusés', 'error');
             }
@@ -2155,6 +2356,42 @@ async function toggleAgentSettings(agent, index) {
             showToast("Erreur lors de l'enregistrement des réglages", 'error');
         }
     });
+
+    document.getElementById(`agent-delete-${index}`).addEventListener('click', async () => {
+        if (!confirm(`Retirer « ${agent.hostname} » de la console ?\n\nLe serveur et les certificats qu'il a remontés disparaissent de CertHelm. Cela ne désinstalle pas l'agent : s'il tourne encore, le serveur réapparaîtra à son prochain contact.`)) return;
+        try {
+            const res = await pywebview.api.delete_agent(agent.hostname);
+            if (res.status === 'success') {
+                showToast(`${escapeHtml(agent.hostname)} retiré de la console`, 'success');
+                renderAgents();
+                refreshAlerts();
+            } else {
+                showToast(escapeHtml(res.message || 'Suppression refusée'), 'error');
+            }
+        } catch (e) {
+            showToast('Erreur lors de la suppression', 'error');
+        }
+    });
+
+    const certsEl = document.getElementById(`agent-certs-${index}`);
+    try {
+        const certs = await pywebview.api.get_agent_certs(agent.hostname);
+        certsEl.innerHTML = certs.length === 0 ? 'Aucun certificat détecté au dernier scan.' : certs.map(c => {
+            const d = agentDaysUntil(c.valid_till);
+            const color = d === null ? 'var(--text-muted)' : (d <= 7 ? '#ef4444' : (d <= 30 ? '#f59e0b' : '#10b981'));
+            const dayText = d === null ? '?' : (d < 0 ? `expiré depuis ${-d} j` : `${d} j`);
+            return `
+            <div style="display:flex; gap:12px; align-items:center; padding:5px 0; border-bottom:1px solid var(--border-ultralight);">
+                <div style="flex:3; min-width:0;">
+                    <div style="color:var(--text-bright); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(c.domain || '?')}</div>
+                    <div style="font-size:11px;">${escapeHtml(c.issuer || 'émetteur inconnu')} · ${escapeHtml(c.install_path || '')}</div>
+                </div>
+                <div style="flex:1; color:${color}; white-space:nowrap;">${dayText}<span style="color:var(--text-muted-dark);"> · ${escapeHtml(c.valid_till || '')}</span></div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        certsEl.textContent = 'Liste indisponible.';
+    }
 
     const historyEl = document.getElementById(`agent-history-${index}`);
     try {
@@ -2169,15 +2406,16 @@ async function toggleAgentSettings(agent, index) {
     }
 }
 
-// ===== CERTIFICATE RENEWAL (Simulation / Réel - see renewal.py) =====
-// "Renouveler" only ever does what the mode in Paramètres allows: Simulation sends
-// nothing anywhere, Réel places a real DigiCert order and has the agent install it.
+// ===== CERTIFICATE RENEWAL (see renewal.py) =====
+// "Renouveler" places a real DigiCert order (possibly billed), has the agent build a
+// new key + CSR on the server and install the issued certificate. A confirmation that
+// spells out the exact order is always required first.
 
-let renewalSettings = { mode: 'dry_run' };
+let renewalSettings = { mode: 'live' };
 let renewalCertsCache = [];
 let renewalRefreshTimer = null;
 
-const RENEWAL_TERMINAL = ['installed', 'failed', 'cancelled', 'simulated'];
+const RENEWAL_TERMINAL = ['installed', 'failed', 'cancelled'];
 const RENEWAL_STATUS = {
     awaiting_csr: ["En attente de l'agent", '#009FDF'],
     csr_ready:    ['Préparation de la commande', '#009FDF'],
@@ -2187,8 +2425,7 @@ const RENEWAL_STATUS = {
     installed:    ['Installé', '#10b981'],
     failed:       ['Échec', '#ef4444'],
     cancelled:    ['Annulé', '#6b7280'],
-    uncertain:    ['Statut incertain', '#ef4444'],
-    simulated:    ['Simulation', '#8b5cf6']
+    uncertain:    ['Statut incertain', '#ef4444']
 };
 
 function renewalStatusPill(status) {
@@ -2197,7 +2434,7 @@ function renewalStatusPill(status) {
 }
 
 function renewalModeBadge(mode) {
-    const map = { off: ['Désactivé', '#6b7280'], dry_run: ['Simulation', '#009FDF'], live: ['RÉEL', '#ef4444'] };
+    const map = { off: ['Désactivé', '#6b7280'], live: ['Activé', '#10b981'] };
     const [label, color] = map[mode] || [mode, '#6b7280'];
     return `<span style="color:${color}; background:${color}22; padding:2px 8px; border-radius:10px;">${escapeHtml(label)}</span>`;
 }
@@ -2260,8 +2497,8 @@ async function renderRenewals() {
     } else {
         jobsEl.innerHTML = jobs.map(j => {
             const active = !RENEWAL_TERMINAL.includes(j.status);
-            const detail = (j.status === 'simulated' && j.payload)
-                ? `<details style="margin-top:6px;"><summary style="cursor:pointer; font-size:11px; color:var(--text-muted);">Voir la commande qui serait envoyée à DigiCert</summary><pre style="font-size:11px; white-space:pre-wrap; color:var(--text-muted); margin:6px 0 0;">${escapeHtml(JSON.stringify(j.payload, null, 2))}</pre></details>`
+            const detail = j.payload
+                ? `<details style="margin-top:6px;"><summary style="cursor:pointer; font-size:11px; color:var(--text-muted);">Voir la requête envoyée à DigiCert (sans la clé privée)</summary><pre style="font-size:11px; white-space:pre-wrap; color:var(--text-muted); margin:6px 0 0;">${escapeHtml(JSON.stringify(j.payload, null, 2))}</pre></details>`
                 : '';
             return `
             <div style="padding:10px 4px; border-bottom:1px solid var(--border-ultralight);">
@@ -2290,20 +2527,40 @@ document.addEventListener('click', async (event) => {
     if (renewBtn && !renewBtn.disabled) {
         const cert = renewalCertsCache[Number(renewBtn.dataset.renewIndex)];
         if (!cert) return;
-        const live = renewalSettings.mode === 'live';
-        const question = live
-            ? `RENOUVELLEMENT RÉEL de ${cert.domain} sur ${cert.hostname}\n\n` +
-              `1. L'agent génère une nouvelle clé et une demande de certificat sur le serveur.\n` +
-              `2. CertHelm PASSE UNE COMMANDE de renouvellement chez DigiCert (peut être facturée).\n` +
-              `3. Le certificat émis remplace automatiquement l'ancien sur ce serveur (l'ancien est conservé).\n\n` +
-              `Confirmer ?`
-            : `Simuler le renouvellement de ${cert.domain} (${cert.hostname}) ?\n\nAucune commande ne sera passée et rien ne sera modifié.`;
-        if (!confirm(question)) return;
         renewBtn.disabled = true;
+
+        // Ask the controller exactly what would be ordered, and show it before anything happens.
+        let preview;
+        try {
+            preview = await pywebview.api.preview_renewal(cert.hostname, cert.thumbprint);
+        } catch (e) {
+            renewBtn.disabled = false;
+            showToast('Erreur lors de la préparation du renouvellement', 'error');
+            return;
+        }
+        if (preview.status !== 'success') {
+            renewBtn.disabled = false;
+            showToast(escapeHtml(preview.message || 'Renouvellement impossible'), 'error');
+            return;
+        }
+        const question =
+            `RENOUVELLEMENT de ${preview.domain} sur ${preview.hostname}\n\n` +
+            `Commande DigiCert : produit ${preview.product}, ${preview.validity_years || 1} an(s), ` +
+            `renouvellement de la commande n° ${preview.original_order_id}.\n` +
+            `Noms couverts : ${(preview.dns_names || []).join(', ')}\n` +
+            `Cette commande peut être facturée par DigiCert.\n\n` +
+            `1. L'agent génère une nouvelle clé et une demande de certificat sur le serveur.\n` +
+            `2. CertHelm passe la commande chez DigiCert.\n` +
+            `3. Le certificat émis remplace automatiquement l'ancien sur ce serveur (l'ancien est conservé).\n\n` +
+            `Confirmer ?`;
+        if (!confirm(question)) {
+            renewBtn.disabled = false;
+            return;
+        }
         try {
             const res = await pywebview.api.start_renewal(cert.hostname, cert.thumbprint);
             if (res.status === 'success') {
-                showToast(res.simulated ? 'Simulation créée — voir « Suivi des renouvellements »' : 'Renouvellement lancé', 'success');
+                showToast('Renouvellement lancé — voir « Suivi des renouvellements »', 'success');
             } else {
                 showToast(escapeHtml(res.message || 'Renouvellement refusé'), 'error');
             }
@@ -2311,6 +2568,7 @@ document.addEventListener('click', async (event) => {
             showToast('Erreur lors du lancement du renouvellement', 'error');
         }
         renderRenewals();
+        refreshAlerts();
         return;
     }
     const cancelBtn = event.target.closest('[data-renew-cancel]');
@@ -2324,6 +2582,7 @@ document.addEventListener('click', async (event) => {
             showToast("Erreur lors de l'annulation", 'error');
         }
         renderRenewals();
+        refreshAlerts();
     }
 });
 
@@ -2345,7 +2604,7 @@ if (document.getElementById('renewal-settings-save-btn')) {
         const mode = document.getElementById('renewal-mode-select').value;
         const baseUrl = document.getElementById('renewal-base-url').value;
         if (mode === 'live' && renewalSettings.mode !== 'live') {
-            if (!confirm("Activer le mode RÉEL ?\n\nLes renouvellements passeront de vraies commandes chez DigiCert (potentiellement facturées) et remplaceront des certificats sur vos serveurs.\n\nUne confirmation vous sera encore demandée pour chaque renouvellement.")) return;
+            if (!confirm("Activer le renouvellement automatique ?\n\n« Renouveler » passera de vraies commandes chez DigiCert (potentiellement facturées) et remplacera des certificats sur vos serveurs.\n\nUne confirmation détaillée vous sera demandée pour chaque renouvellement.")) return;
         }
         try {
             const res = await pywebview.api.set_renewal_settings(mode, baseUrl);

@@ -4,9 +4,9 @@ DigiCert CertCentral REST helpers used by the automatic renewal workflow.
 IMPORTANT - NOT VERIFIED AGAINST THE LIVE SERVICE. This code follows the public
 CertCentral v2 API documentation (order/certificate/{product}, order status,
 certificate download) but has only ever been exercised against a local fake
-server. Ordering a certificate can be billed: use the "Simulation" mode of the
-app first, then try "Réel" once against DigiCert's demo environment (set
-digicert_base_url) before pointing it at production.
+server. Ordering a certificate can be billed: run a first renewal against
+DigiCert's demo environment (Paramètres → Renouvellement → URL de l'API) before
+pointing the application at production.
 
 Every function takes the HTTP transport as a parameter so tests can substitute
 a fake and no real request ever leaves the machine by accident.
@@ -109,8 +109,8 @@ def build_renewal_request(order, csr_pem, validity_years=DEFAULT_VALIDITY_YEARS)
 
 
 def describe_request(name_id, payload):
-    """The request as it would be sent, with the CSR replaced by a placeholder -
-    what the Simulation mode shows and stores."""
+    """The request as it will be sent, with the CSR replaced by a placeholder -
+    shown to the user before they confirm a renewal, and stored with the job."""
     described = json.loads(json.dumps(payload))
     described["certificate"]["csr"] = CSR_PLACEHOLDER
     return {"method": "POST", "endpoint": f"/order/certificate/{name_id}", "body": described}

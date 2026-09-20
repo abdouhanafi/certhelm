@@ -9,7 +9,7 @@ agent token like administrative credentials.
 |---|---|
 | DigiCert API key | OS credential store (`keyring`; Windows Credential Manager). Never in `config.json` or the database. |
 | SMTP password | Same. |
-| Agent token | Same on the controller; plain text in each agent's `agent_config.json` (restrict the file permissions). |
+| Agent token | Same on the controller; plain text in each agent's `agent_config.json`. The Windows installer restricts that folder to Administrators and SYSTEM; on Linux use `chmod 600`. |
 | Private keys of renewed certificates | Generated and kept on the server. Never sent to, or created by, the controller. |
 
 ## Agent ↔ controller channel
@@ -27,7 +27,8 @@ agent token like administrative credentials.
 Commands are an allow-list on both sides:
 
 * `scan_now` — always allowed.
-* `generate_csr`, `install_cert` — only if that server's own `agent_config.json` contains `"allow_cert_management": true`.
+* `generate_csr`, `install_cert` — only if that server's own `agent_config.json` contains `"allow_cert_management": true` (the
+  installer's *Autoriser CertHelm à renouveler* box). The agent reports this setting so the console can refuse up front.
 
 Anything else is refused. Parameters are treated as untrusted: domain names and job ids are re-validated (no shell
 metacharacters, no line breaks), the target certificate is found by the agent from its own scan, file paths and reload/test
@@ -43,12 +44,12 @@ opt-in per server, rollback, restricted DigiCert URL.
 
 ## Hardening checklist
 
-- [ ] Install the Windows agent under `C:\Program Files\…` (admin-writable only): it runs as SYSTEM.
+- [ ] Install the Windows agent with `CertHelmAgent_Setup.exe`: it uses `C:\Program Files\CertHelmAgent` and restricts it to Administrators and SYSTEM, because the agent runs as SYSTEM.
 - [ ] Firewall the listener port to the server subnets only.
 - [ ] Put a TLS reverse proxy in front of the listener, or keep the channel on an isolated network.
 - [ ] `chmod 600` the Linux `agent_config.json` and keep `/etc/ssl/private`-style permissions on key files.
 - [ ] Enable `allow_cert_management` only on servers where you have tested the flow.
-- [ ] Keep Renewal mode on **Simulation** until you have completed a Live test on the DigiCert demo environment.
+- [ ] Run a first renewal against the DigiCert demo environment (Settings → Renouvellement automatique) before pointing at production; switch renewal off in Settings when it is not needed.
 - [ ] Never commit `agent_config.json`, `config.json`, `workflow.db`, keys or certificates (already git-ignored).
 
 ## Known limitations

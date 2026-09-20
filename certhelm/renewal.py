@@ -7,12 +7,13 @@ A renewal job walks through these states:
         (agent builds     (controller   (DigiCert order   (waiting for     (agent installs)
          key + CSR)        claims it)    being placed)     issuance)
     ... any step can end in: failed | cancelled | uncertain
-    simulated: what "Simulation" mode produces - nothing was sent anywhere.
 
 Safety rules baked in here:
-  * Three modes, stored in the database (NOT config.json, which the Settings
-    form rewrites): off / dry_run (default) / live. Only 'live' ever contacts
-    DigiCert or an agent.
+  * A global switch, stored in the database (NOT config.json, which the Settings
+    form rewrites): off / live. Nothing contacts DigiCert or an agent when it is
+    'off'. Even when 'live', a renewal only starts after an explicit click and
+    confirmation, and only on servers whose administrator opted in
+    (allow_cert_management in the agent's own config).
   * The step that places a DigiCert order is claimed with a compare-and-swap
     (csr_ready -> ordering), so one job can never place two orders.
   * If the outcome of an order request is ambiguous (timeout, 5xx) the job is
@@ -35,8 +36,8 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 import database as db
 import digicert_api as dc
 
-MODES = ('off', 'dry_run', 'live')
-DEFAULT_MODE = 'dry_run'
+MODES = ('off', 'live')
+DEFAULT_MODE = 'live'
 SETTING_MODE = 'renewal_mode'
 SETTING_BASE_URL = 'digicert_base_url'
 
@@ -56,6 +57,8 @@ _PEM_CERT_RE = re.compile(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE--
 
 def get_mode():
     mode = db.get_setting(SETTING_MODE, DEFAULT_MODE)
+    if mode == 'dry_run':
+        return 'off'  # the removed Simulation mode: a database from that era must not silently go live
     return mode if mode in MODES else DEFAULT_MODE
 
 
@@ -180,44 +183,56 @@ class RenewalManager:
 
     # ---------- starting a renewal (user clicked "Renouveler" and confirmed) ----------
 
-    def start(self, hostname, thumbprint):
-        mode = get_mode()
-        if mode == 'off':
-            return _err("Le renouvellement automatique est désactivé (Paramètres → Renouvellement).")
+    def _prepare(self, hostname, thumbprint):
+        """Every check that must pass before a renewal can start. Returns
+        (context, None) or (None, error_response); places nothing anywhere."""
+        if get_mode() == 'off':
+            return None, _err("Le renouvellement automatique est désactivé (Paramètres → Renouvellement).")
 
         thumbprint = (thumbprint or '').upper()
         cert = next((c for c in db.get_all_discovered_certs()
                      if c['hostname'] == hostname and (c['thumbprint'] or '').upper() == thumbprint), None)
         if not cert:
-            return _err("Certificat introuvable dans les derniers scans de cet agent.")
+            return None, _err("Certificat introuvable dans les derniers scans de cet agent.")
         agent = next((a for a in db.get_all_agents() if a['hostname'] == hostname), None)
         if not agent:
-            return _err("Agent inconnu.")
+            return None, _err("Agent inconnu.")
         if not supports_cert_management(agent.get('agent_version')):
-            return _err("Cet agent est trop ancien pour gérer les certificats (v2.1 minimum). Réinstallez-le.")
+            return None, _err("Cet agent est trop ancien pour gérer les certificats (v2.1 minimum). Réinstallez-le.")
+        if agent.get('cert_management') is False:
+            return None, _err("L'administrateur de ce serveur n'a pas autorisé le renouvellement automatique "
+                              "(case à cocher de l'installateur de l'agent, ou allow_cert_management dans "
+                              "agent_config.json).")
 
         order = dc.find_order_for_domain(self.get_orders(), cert['domain'])
         if not order:
-            return _err(f"« {cert['domain']} » n'a pas de commande émise dans votre compte DigiCert : "
-                        "impossible de le renouveler depuis cet outil.")
+            return None, _err(f"« {cert['domain']} » n'a pas de commande émise dans votre compte DigiCert : "
+                              "impossible de le renouveler depuis cet outil.")
         try:
             name_id, payload = dc.build_renewal_request(order, dc.CSR_PLACEHOLDER)
         except dc.DigiCertError as e:
-            return _err(str(e))
-        preview = dc.describe_request(name_id, payload)
-        dns_names = payload['certificate']['dns_names']
+            return None, _err(str(e))
+        return {"cert": cert, "agent": agent, "order": order, "name_id": name_id, "payload": payload}, None
 
-        if mode == 'dry_run':
-            job_id, _ = db.create_renewal_job(
-                hostname, cert['domain'], cert['thumbprint'], cert['install_path'], cert['valid_till'],
-                'simulated',
-                f"SIMULATION - rien n'a été envoyé. En mode Réel : commande de renouvellement du produit "
-                f"{name_id} (commande d'origine n° {order.get('id')}), 1 an, noms : {', '.join(dns_names)}. "
-                "Elle peut être facturée par DigiCert.",
-                'dry_run', dns_names, preview)
-            return _ok(job_id=job_id, simulated=True)
+    def preview(self, hostname, thumbprint):
+        """What starting this renewal would do, for the confirmation dialog.
+        Nothing is sent or stored."""
+        ctx, error = self._prepare(hostname, thumbprint)
+        if error:
+            return error
+        payload = ctx['payload']
+        return _ok(domain=ctx['cert']['domain'], hostname=hostname, product=ctx['name_id'],
+                   dns_names=payload['certificate']['dns_names'],
+                   validity_years=payload.get('validity_years'),
+                   original_order_id=ctx['order'].get('id'),
+                   install_path=ctx['cert']['install_path'])
 
-        # ---- live ----
+    def start(self, hostname, thumbprint):
+        ctx, error = self._prepare(hostname, thumbprint)
+        if error:
+            return error
+        cert, agent = ctx['cert'], ctx['agent']
+
         seen = agent.get('last_seen')
         live = False
         if seen:
@@ -228,17 +243,18 @@ class RenewalManager:
         if not live:
             return _err("L'agent n'est pas en ligne : impossible de lui faire préparer la demande de certificat.")
 
+        dns_names = ctx['payload']['certificate']['dns_names']
         job_id, created = db.create_renewal_job(
             hostname, cert['domain'], cert['thumbprint'], cert['install_path'], cert['valid_till'],
             'awaiting_csr', "Demande envoyée à l'agent : génération de la clé et du CSR sur le serveur.",
-            'live', dns_names, preview)
+            'live', dns_names, dc.describe_request(ctx['name_id'], ctx['payload']))
         if not created:
             return _err(f"Un renouvellement est déjà en cours pour ce certificat (n° {job_id}).")
         db.queue_command(hostname, 'generate_csr', {
             "job_id": job_id, "domain": cert['domain'], "dns_names": dns_names,
             "old_thumbprint": cert['thumbprint'],
         })
-        return _ok(job_id=job_id, simulated=False)
+        return _ok(job_id=job_id)
 
     def cancel(self, job_id):
         job = db.get_renewal_job(job_id)
@@ -331,7 +347,8 @@ class RenewalManager:
 
     def _place_order(self, job):
         if get_mode() != 'live':
-            self._fail(job, "Mode Réel désactivé entre-temps : aucune commande passée.", expected='csr_ready')
+            self._fail(job, "Renouvellement automatique désactivé entre-temps : aucune commande passée.",
+                       expected='csr_ready')
             return
         order = dc.find_order_for_domain(self.get_orders(), job['domain'])
         try:
@@ -439,6 +456,8 @@ class RenewalManager:
                 reason = "Renouvellement désactivé"
             elif not agent or not supports_cert_management(agent.get('agent_version')):
                 reason = "Agent < 2.1"
+            elif agent.get('cert_management') is False:
+                reason = "Non autorisé sur ce serveur"
             elif not in_digicert:
                 reason = "Absent du compte DigiCert"
             elif job and job['status'] not in db.RENEWAL_TERMINAL:

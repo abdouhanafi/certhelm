@@ -22,7 +22,7 @@ réellement déployé sur chaque serveur et, sous contrôles explicites, automat
 |---|---|
 | **Visibilité** | Un tableau de bord unique : commandes, horizons d'expiration, statut de validation, historique des renouvellements. |
 | **Assurance** | Rapprochement continu entre les certificats émis par l'autorité et ceux installés sur les serveurs. |
-| **Automatisation maîtrisée** | Renouvellement et installation avec mode simulation, consentement par serveur, commande atomique et retour arrière automatique. |
+| **Automatisation maîtrisée** | Renouvellement et installation avec consentement par serveur, confirmation détaillant la commande exacte, commande atomique et retour arrière automatique. |
 
 **Statut : bêta.** La supervision, la découverte et le pilotage à distance sont couverts par des tests automatisés. La chaîne de renouvellement
 automatisé n'a été vérifiée que contre une autorité simulée ; voir [Maturité du projet](#maturité-du-projet) avant tout usage en production.
@@ -35,25 +35,26 @@ automatisé n'a été vérifiée que contre une autorité simulée ; voir [Matur
 | Certificat renouvelé mais jamais déployé | Absence de retour d'information entre l'autorité et les serveurs | Les agents remontent les certificats installés ; rapprochement émis / installé |
 | Certificats inconnus en production | Certificats obtenus hors du processus central | Détection des certificats absents du compte de l'autorité |
 | Renouvellement lent et sujet aux erreurs | Clé, CSR, commande et installation réparties entre équipes | Parcours guidé et chaîne automatisée optionnelle |
-| Automatisation sur-privilégiée | Scripts à droits étendus, sans modèle de consentement | Liste blanche de commandes, adhésion par serveur, simulation par défaut |
+| Automatisation sur-privilégiée | Scripts à droits étendus, sans modèle de consentement | Liste blanche de commandes, adhésion par serveur, confirmation explicite de chaque commande |
 
 ## Périmètre fonctionnel
 
 | Domaine | Contenu |
 |---|---|
-| **Supervision et alertes** | Inventaire des commandes avec compte à rebours, filtres et export CSV ; notifications bureau ; alertes SMTP optionnelles ; messages préparés pour approbateurs, responsables DNS et installateurs. |
+| **Supervision et alertes** | Inventaire des commandes avec compte à rebours, filtres et export CSV ; centre d'alertes (cloche) couvrant les échéances DigiCert, les certificats tout juste expirés, les certificats de serveurs proches de l'expiration, les agents hors ligne, les renouvellements en échec et les connexions rompues, actualisé chaque minute ; notifications bureau ; alertes SMTP optionnelles ; messages préparés pour approbateurs, responsables DNS et installateurs. |
 | **Workflow de renouvellement** | Tableau par étapes (approbation, validation DNS, commande, installation, vérification) avec relances et historique. |
 | **Conformité et tendances** | Statistiques de durée de validité ; historique des renouvellements construit automatiquement. |
 | **Découverte et rapprochement** | Agents Windows et Linux ; identification des certificats émis mais non déployés, et déployés mais inconnus de l'autorité. |
-| **Opérations à distance** | Scan à la demande, fréquence et activation par agent, via un canal où seul l'agent initie la connexion. |
+| **Déploiement des agents** | Un installeur autonome, `CertHelmAgent_Setup.exe`, à remettre à l'administrateur du serveur : il vérifie l'adresse et le jeton, installe l'agent dans un dossier réservé aux administrateurs, le fait démarrer avec Windows et attend que le serveur apparaisse dans la console. Mode silencieux pour les déploiements scriptés. |
+| **Opérations à distance** | Par agent : statut, adresse, version, certificats remontés, scan à la demande, fréquence, activation, retrait de la console, via un canal où seul l'agent initie la connexion. |
 | **Renouvellement automatisé** | Clé et CSR générés sur le serveur, commande auprès de l'autorité, vérification du certificat émis, installation par l'agent (magasin Windows et bindings IIS ; fichiers PEM et rechargement du service sous Linux). Désactivé sauf activation explicite. |
 | **Gouvernance** | Affectations par domaine, journal d'audit, notes et listes de contrôle. |
 
 ## Vues du produit
 
-| Agents et découverte | Suivi des renouvellements (mode simulation) |
-|---|---|
-| ![Agents et découverte](docs/screenshots/agents.jpg) | ![Suivi des renouvellements](docs/screenshots/renewal.jpg) |
+| Centre d'alertes | Agents et découverte | Suivi des renouvellements |
+|---|---|---|
+| ![Centre d'alertes](docs/screenshots/alerts.jpg) | ![Agents et découverte](docs/screenshots/agents.jpg) | ![Suivi des renouvellements](docs/screenshots/renewal.jpg) |
 
 *Captures réalisées avec des données fictives.*
 
@@ -63,7 +64,7 @@ automatisé n'a été vérifiée que contre une autorité simulée ; voir [Matur
 |---|---|
 | **Confidentialité des clés privées** | Les clés sont générées sur le serveur cible et ne sont jamais transmises ; seule la demande de signature circule. |
 | **Intégrité des certificats déployés** | Le contrôleur vérifie le certificat émis (clé, domaine, validité) ; l'agent vérifie à nouveau avant tout remplacement. |
-| **Maîtrise des dépenses et des actions non voulues** | Simulation par défaut ; confirmation explicite par renouvellement ; verrou atomique d'une commande unique ; résultats ambigus gelés pour revue humaine. |
+| **Maîtrise des dépenses et des actions non voulues** | Confirmation explicite par renouvellement, détaillant la commande DigiCert exacte (produit, noms, commande d'origine) ; interrupteur global ; verrou atomique d'une commande unique ; résultats ambigus gelés pour revue humaine. |
 | **Moindre privilège et périmètre d'impact limité** | Adhésion par serveur ; listes blanches de commandes des deux côtés ; le contrôleur n'envoie jamais de chemin ni de ligne de commande. |
 | **Capacité de reprise** | Linux : sauvegardes horodatées, test de configuration, restauration automatique. Windows : bindings restaurés en cas d'échec, ancien certificat conservé. |
 | **Gestion des secrets** | Clé API, mot de passe SMTP et jeton d'agent dans le coffre d'identifiants du système ; aucun secret dans le dépôt. |
@@ -76,7 +77,7 @@ automatisé n'a été vérifiée que contre une autorité simulée ; voir [Matur
 | **1. Observer** | Vue consolidée de l'inventaire et du risque d'expiration | Connecter la clé API CertCentral |
 | **2. Rapprocher** | Comparer certificats émis et installés | Déployer les agents en scan en lecture seule |
 | **3. Piloter** | Administrer les agents de façon centralisée | Agents en fonctionnement continu ; scan et réglages à distance |
-| **4. Automatiser** | Renouveler et installer sous contrôle | Simulation, puis environnement de démonstration DigiCert sur un serveur non critique, puis production |
+| **4. Automatiser** | Renouveler et installer sous contrôle | Autoriser le renouvellement sur un serveur non critique à l'installation de son agent ; premier essai sur l'environnement de démonstration DigiCert, puis production |
 
 ## Démarrage
 
@@ -103,16 +104,17 @@ Le guide détaillé, avec pare-feu, installation des agents et dépannage, est d
 
 | Composant | Statut | Base |
 |---|---|---|
-| Inventaire, supervision, alertes | Testé | Tests automatisés |
+| Inventaire, supervision, centre d'alertes | Testé | Tests automatisés, et exercé dans un navigateur contre un faux DigiCert local |
 | Agents de découverte (Windows, Linux) | Testé | Tests automatisés ; logique Linux exécutée avec un vrai `openssl` en dossiers temporaires |
-| Scan et réglages à distance | Testé | Tests de bout en bout, y compris l'agent compilé |
+| Scan, réglages et retrait d'un agent à distance | Testé | Tests de bout en bout, y compris l'agent compilé ; piloté aussi manuellement sur un vrai agent Windows 11 |
+| Installeur de l'agent | Testé | Tests automatisés (commandes Windows enregistrées, non exécutées) et installation manuelle sur Windows 11 (agent enregistré et piloté depuis la console) |
 | Machine à états du renouvellement et garde-fous | Testé contre une autorité simulée | Plus de 60 contrôles : concurrence, cas d'échec, retour arrière |
 | Appels DigiCert (commande, statut, téléchargement) | **Non validé en réel** | Conformes à la documentation publique ; exécutés contre un faux serveur local uniquement |
 | `certreq` et bindings IIS sous Windows | **Non validé sur machines réelles** | Commandes simulées dans les tests |
 | Rechargement du serveur web sous Linux | **Non validé sur machines réelles** | Faux service dans les tests |
 
-Parcours de validation recommandé avant production : simulation, puis mode Réel sur l'environnement de démonstration DigiCert
-(`https://demo.digicert.com/services/v2`) avec un serveur non critique, journal de l'agent supervisé.
+Parcours de validation recommandé avant production : un premier renouvellement sur l'environnement de démonstration DigiCert
+(`https://demo.digicert.com/services/v2`, à saisir dans les Paramètres) avec un serveur non critique, journal de l'agent supervisé.
 
 ## Structure, qualité, compilation
 
